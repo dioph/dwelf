@@ -3,23 +3,38 @@ import matplotlib.pyplot as plt
 from scipy.optimize import leastsq
 from scipy.cluster.vq import whiten, kmeans2
 import emcee, corner
+from time import process_time
+from itertools import product
+import warnings
+warnings.filterwarnings('ignore')
 
 class Modeler(object):
-	def __init__(self):
-		self.l1 = 0.70
-		self.l2 = 0.00
-		self.ir = 0.29
-		self.x = linspace(0,45,500)
-		self.y = ones(500)
-		self.rmin = 1.0
-		self.rmax = 1.0
-		self.inc_min = 0; self.inc_max = 90
-		self.Teq_min = 1; self.Teq_max = 45
-		self.k_min = -0.6; self.k_max = 0.6
-		self.lat_min = -90; self.lat_max = 90
-		self.lon_min =  0; self.lon_max = 360
-		self.rad_min = 5; self.rad_max = 25
-		self.stdv = 0.003
+	def __init__(self, l1=0.70, l2=0.00, ir=0.29, x=linspace(0,45,500), y=ones(500), rmin=1.0, rmax=1.0,
+				inc_min=0, inc_max=90, Teq_min=1, Teq_max=45, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90,
+				lon_min=0, lon_max=360, rad_min=5, rad_max=25, stdv=0.003, n_spots=2, n_iter=20, n_clusters=30,
+				burn=50, n_walkers=120, n_steps=1000, v_min=0, v_max=10):
+		self.l1 = l1
+		self.l2 = l2
+		self.ir = ir
+		self.x = x
+		self.y = y
+		self.rmin = rmin
+		self.rmax = rmax
+		self.inc_min = inc_min; self.inc_max = inc_max
+		self.Teq_min = Teq_min; self.Teq_max = Teq_max
+		self.k_min = k_min; self.k_max = k_max
+		self.lat_min = lat_min; self.lat_max = lat_max
+		self.lon_min =  lon_min; self.lon_max = lon_max
+		self.rad_min = rad_min; self.rad_max = rad_max
+		self.stdv = stdv
+		self.n_spots = n_spots
+		self.n_iter = n_iter
+		self.n_clusters = n_clusters
+		self.n_dim = 3 + 3*n_spots
+		self.burn = burn
+		self.n_walkers = n_walkers
+		self.n_steps = n_steps
+		self.v_min = v_min; self.v_max = v_max
 		
 	def eker(self, theta):
 		d2r = pi / 180
@@ -32,7 +47,7 @@ class Modeler(object):
 		period = Teq / (1 - k * sin(bet)**2)
 		cosrad = cos(rad)
 		sinrad = sin(rad)
-		phase = time / period
+		phase = self.x / period
 		phi = 2.0 * pi * phase
 		nphi = len(phi)
 		costhe0 = cos(inc) * sin(bet) + sin(inc) * cos(bet) * cos(phi-lam)
@@ -104,27 +119,44 @@ class Modeler(object):
 		return lc
 		
 	def solve(self, theta):
-		self.ndim = len(theta)
-		n_spots = int((self.ndim-3)/3)
-		self.y = self.eker(theta[:6])
-		for i in range(2, n_spots+1):
-			self.y += -1 + self.eker(append(theta[:3], theta[3*i:3*(i+1)]))
+		ndim = len(theta)
+		nspots = int((ndim-3)/3)
+		y = self.eker(theta[:6])
+		for i in range(2, nspots+1):
+			y += -1 + self.eker(append(theta[:3], theta[3*i:3*(i+1)]))
+		return y
+	
+	def normalize(self):
+		self.x -= min(self.x)
+		good = logical_and(~isnan(self.y), self.x <= 45)
+		self.x = self.x[good]
+		self.y = self.y[good]
+		self.y /= max(self.y)
+		k = int(len(self.y)/500)
+		if len(self.y) > 500:
+			chosen = [i % k == 0 for i in range(len(self.y))]
+			self.x = self.x[chosen]
+			self.y = self.y[chosen]
 	
 	def vsini(self, i, T):
 		return [50.592731692185623*self.rmin*sin(i*pi/180)/T, 50.592731692185623*self.rmax*sin(i*pi/180)/T]
 	
 	def lnprior(self, theta):
-		self.ndim = len(theta)
-		n_spots = int((self.ndim-3)/3)
+		ndim = len(theta)
+		nspots = int((ndim-3)/3)
 		inc, Teq, k = theta[:3]
+		v = self.vsini(inc, Teq)
+		if self.v_max < v[0] or v[1] < self.v_min:
+			return -inf
 		if not (self.inc_min < inc < self.inc_max and self.Teq_min < Teq < self.Teq_max and self.k_min < k < self.k_max):
 			return -inf
-		for i in range(1, n_spots+1):
+		for i in range(1, nspots+1):
 			if not (self.lat_min < theta[3*i] < self.lat_max and self.lon_min < theta[3*i+1] < self.lon_max and self.rad_min < theta[3*i+2] < self.rad_max):
 				return -inf
 		return 0.0
 	
-	def chi(self, theta):
+	def chi(self, theta, star_params=[]):
+		theta = append(star_params, theta)
 		self.diff = self.y - self.solve(theta)
 		return sum(self.diff**2) / self.stdv
 	
@@ -134,13 +166,116 @@ class Modeler(object):
 			return -inf
 		return lp - self.chi(theta)
 		
-	def normalize(self):
-		self.x -= min(self.x)
-		good = logical_and(~isnan(self.y), self.x <= 45)
-		self.x = self.x[good]
-		self.y = self.y[good]
-		self.y /= max(self.y)
+	def eps(self, theta, star_params=[]):
+		theta = append(star_params, theta)
+		lp = self.lnprior(theta)
+		if not isfinite(lp):
+			return ones(len(self.y))
+		return self.y - self.solve(theta)
+		
+	def llsq(self, p0s, n_iter=0, star_params=[]):
+		opts = []
+		sses = []
+		for p0 in p0s:
+			p1 = p0[len(star_params):]
+			fps, ier = leastsq(self.eps, p1, args=(star_params), maxfev=n_iter)
+			if any(isnan(fps)) == False:
+				opts.append(append(star_params, fps))
+				sses.append(self.chi(fps, star_params))
+		return opts, sses
+		
+	def singlefit(self, p0s, star_params=[]):
+		opts, sses = self.llsq(p0s, self.n_iter, star_params=star_params)
+		stups = sorted(zip(sses, opts), key=lambda x: x[0])
+		sses, opts = zip(*stups)
+		optsmat = whiten(array(opts[:int(0.75*len(opts))]))
+		centroid, label = kmeans2(optsmat, self.n_clusters, iter=20, minit='points')
+		label = list(label)
+		p0s = [opts[label.index(i)] for i in range(self.n_clusters) if i in label]
+		opts, sses = self.llsq(p0s, star_params=star_params)
+		stups = sorted(zip(sses, opts), key=lambda x: x[0])
+		sses, opts = zip(*stups)
+		return opts[:min(6, len(opts))]
 	
-	def eps(self, theta):
-		pass
+	def multifit(self, p0s):
+		t1 = process_time()
+		opts1 = self.singlefit(p0s)
+		t2 = process_time()
+		print('FIRST FIT: {0:.2f} s'.format(t2-t1))
+		for i in range(1, self.n_spots):
+			p = []
+			for p1 in opts1:
+				y_r = self.y
+				self.y = y_r - self.solve(p1) + 1
+				opts2 = self.singlefit(p0s, star_params=p1[:3])
+				self.y = y_r
+				for p2 in opts2:
+					p.append(append(p1, p2[3:]))
+			t3 = process_time()
+			print('MULTI FIT #{1}: {0:.2f} s'.format(t3-t2, i))
+			opts, sses = self.llsq(p)
+			t4 = process_time()
+			print('SIMULFIT #{1}: {0:.2f} s'.format(t4-t3, i))
+			stups = sorted(zip(sses, opts), key=lambda x: x[0])
+			sses, opts = zip(*stups)
+			opts1 = opts
+		print('TOTAL: {0:.2f} s'.format(t4-t1))
+		return opts[:min(6, len(opts))]
+		
+	def spacedvals(self):
+		p0s = []
+		mins = [self.inc_min, self.Teq_min, self.k_min, self.lat_min, self.lon_min, self.rad_min]
+		maxs = [self.inc_max, self.Teq_max, self.k_max, self.lat_max, self.lon_max, self.rad_max]
+		for i in range(6):
+			p0s.append(arange(mins[i]+(maxs[i]-mins[i])/6.0, maxs[i], (maxs[i]-mins[i])/3.0))
+		return list(product(*p0s))
+		
+	def minimize(self):	
+		self.normalize()
+		p0s = self.spacedvals()
+		opts = self.multifit(p0s)
+		self.yf = [self.solve(theta) for theta in opts]
+		return opts
+		
+	def mcmc(self, p0s):
+		sampler = emcee.EnsembleSampler(self.n_walkers, self.n_dim, self.lnprob)
+		print("Running MCMC...")
+		t1 = process_time()
+		sampler.run_mcmc(p0s, self.n_steps)
+		print("Done.")
+		t2 = process_time()
+		print('Took {0:.3f} seconds'.format(t2-t1))
+		return sampler.chain
+		
+	def fit(self):
+		result = self.minimize()
+		n = len(result)
+		if len(shape(result)) == 1:
+			p0s = [result + .1 * random.randn(self.n_dim) for i in range(self.n_walkers)]
+		else:
+			p0s = [result[j] + .1 * random.randn(self.n_dim) for i in range(int(self.n_walkers/n)) for j in range(n)]
+		self.chain = self.mcmc(p0s)
+		self.samples = self.chain[:, self.burn:, :].reshape((-1, self.n_dim))
+		p = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]), zip(*percentile(self.samples, [16,50,84], axis=0)))
+		return list(p)
+	
+	def plot_min(self):
+		plt.plot(self.x , self.y, 'r.')
+		colors = "bgycmk"
+		for i in range(len(self.yf)):
+			plt.plot(self.x, self.yf[i], colors[i])
+		plt.show()
+		
+	def plot_mcmc(self):
+		lab = []
+		fig, axes = plt.subplots(self.n_spots+1, 3, sharex=True)	
+		axes[0][0].plot(self.chain[:, :, 0].T, color="k", alpha=0.4); axes[0][0].set_ylabel("$i$"); lab.append("$i$")
+		axes[0][1].plot(self.chain[:, :, 1].T, color="k", alpha=0.4); axes[0][1].set_ylabel("$P_{eq}$"); lab.append("$P_{eq}$")
+		axes[0][2].plot(self.chain[:, :, 2].T, color="k", alpha=0.4); axes[0][2].set_ylabel("$k$"); lab.append("$k$")
+		for i in range(1, self.n_spots+1):
+			axes[i][0].plot(self.chain[:, :, 3*i].T, color="k", alpha=0.4); axes[i][0].set_ylabel("$\\beta_{0}$".format(i)); lab.append("$\\beta_{0}$".format(i))
+			axes[i][1].plot(self.chain[:, :, 3*i+1].T, color="k", alpha=0.4); axes[i][1].set_ylabel("$\lambda_{0}$".format(i)); lab.append("$\lambda_{0}$".format(i))
+			axes[i][2].plot(self.chain[:, :, 3*i+2].T, color="k", alpha=0.4); axes[i][2].set_ylabel("$R_{0}$".format(i)); lab.append("$R_{0}$".format(i))
+		corner.corner(self.samples, labels=lab)
+		plt.show()
 		
