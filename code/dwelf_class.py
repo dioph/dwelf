@@ -5,6 +5,7 @@ from scipy.cluster.vq import whiten, kmeans2
 import emcee, corner
 from time import process_time
 from itertools import product
+import sys
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -12,7 +13,8 @@ class Modeler(object):
 	def __init__(self, l1=0.70, l2=0.00, ir=0.29, x=linspace(0,45,500), y=ones(500), rmin=1.0, rmax=1.0,
 				inc_min=0, inc_max=90, Teq_min=1, Teq_max=45, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90,
 				lon_min=0, lon_max=360, rad_min=5, rad_max=25, stdv=0.003, n_spots=2, n_iter=20, n_clusters=30,
-				burn=100, n_walkers=120, n_steps=1000, v_min=0, v_max=10, threshratio=2):
+				burn=100, n_walkers=120, n_steps=1000, v_min=0, v_max=10, threshratio=2, n_temps=1, thin=1,
+				n_spaced=3, savefile=None):
 		'''
 		class constructor
 		'''
@@ -33,11 +35,15 @@ class Modeler(object):
 		self.n_iter = n_iter	# number of initial iterations of the L-M algorithm during the fitting process
 		self.n_clusters = n_clusters	# number of clusters found by kmeans to simplify fitting process
 		self.n_dim = 3 + 3*n_spots	# number of parameters to fit (3 star params + 3 spot params for each spot)
-		self.burn = burn	# burn-in period of MCMC (recommended: 0.1 * n_steps)
+		self.burn = burn	# burn-in period of MCMC (recommended: 0.1 * n_steps/thin)
 		self.n_walkers = n_walkers	# number of walkers in MCMC (multiple of every integer 1..6)
 		self.n_steps = n_steps	# number of steps in MCMC
 		self.v_min = v_min; self.v_max = v_max	# v sin i (in km/s)
 		self.threshratio = threshratio	# multiplying factor to determine threshold of acceptable chi
+		self.thin = thin	# thinning factor used in MCMC
+		self.n_temps = n_temps	# number of temperatures used in Parallel Tempering
+		self.n_spaced = n_spaced	# number of spaced values per parameter
+		self.savefile = savefile
 		
 	def eker(self, theta):
 		'''
@@ -281,7 +287,7 @@ class Modeler(object):
 					p.append(append(p1, p2[3:]))
 			t3 = process_time()
 			print('MULTIFIT #{1}: {0:.2f} s'.format(t3-t2, i))
-			opts, sses = self.llsq(p)	# for each new fit, do a simultaneous fit of all parameters so far
+			opts, sses = self.llsq(p)	# for each new spot, do a simultaneous fit of all parameters so far
 			t4 = process_time()
 			print('SIMULFIT #{1}: {0:.2f} s'.format(t4-t3, i))
 			sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))	# sort fits with respect to chi
@@ -291,14 +297,16 @@ class Modeler(object):
 		
 	def spacedvals(self):
 		'''
-		defines 3^6 initial points spaced in allowed parameter region
+		defines (n_spaced)**6 initial points spaced in allowed parameter region
 		'''
 		p0s = []
 		mins = [self.inc_min, self.Teq_min, self.k_min, self.lat_min, self.lon_min, self.rad_min]
 		maxs = [self.inc_max, self.Teq_max, self.k_max, self.lat_max, self.lon_max, self.rad_max]
 		for i in range(6):
-			p0s.append(arange(mins[i]+(maxs[i]-mins[i])/6.0, maxs[i], (maxs[i]-mins[i])/3.0))
-		return list(product(*p0s))
+			p0s.append(arange(mins[i]+(maxs[i]-mins[i])/(2*self.n_spaced), maxs[i], (maxs[i]-mins[i])/self.n_spaced))
+		q = list(product(*p0s))
+		random.shuffle(q)
+		return q
 		
 	def minimize(self):
 		'''
@@ -309,6 +317,7 @@ class Modeler(object):
 		p0s = self.spacedvals()
 		opts = self.multifit(p0s)
 		self.yf = [self.solve(theta) for theta in opts]
+		self.bestps = opts
 		return opts
 		
 	def mcmc(self, p0s):
@@ -318,33 +327,74 @@ class Modeler(object):
 		sampler = emcee.EnsembleSampler(self.n_walkers, self.n_dim, self.lnprob)
 		print("Running MCMC...")
 		t1 = process_time()
-		sampler.run_mcmc(p0s, self.n_steps)
+		if self.savefile:
+			f = open(self.savefile, "w")
+			f.close()
+		# progress bar:
+		width = 30
+		for i, result in enumerate(sampler.sample(p0s, iterations=self.n_steps, thin=self.thin)):
+			n = int((width+1) * float(i) / self.n_steps)
+			sys.stdout.write("\r[{0}{1}]".format('#' * n, ' ' * (width - n)))
+			if self.savefile:
+				position = result[0]
+				f = open(self.savefile, "a")
+				for k in range(position.shape[0]):
+					f.write("{0:4d} {1:s}\n".format(k, " ".join([str(pos) for pos in position[k]])))
+				f.close()
+		sys.stdout.write("\n")
 		print("Done.")
 		t2 = process_time()
 		print('Took {0:.3f} seconds'.format(t2-t1))
-		return sampler.chain
-		
+		return sampler
+	
+	def ptmcmc(self, p0s):
+		'''
+		runs Parallel Tempering Monte Carlo Markov Chain algorithm to determine multi-modal uncertainties
+		'''
+		logl = lambda theta: -self.chi(theta)
+		sampler = emcee.PTSampler(self.n_temps, self.n_walkers, self.n_dim, logl, self.lnprior)
+		print("Running MCMC...")
+		t1 = process_time()
+		# progress bar:
+		width = 30
+		for i, result in enumerate(sampler.sample(p0s, iterations=self.n_steps, thin=self.thin)):
+			n = int((width+1) * float(i) / self.n_steps)
+			sys.stdout.write("\r[{0}{1}]".format('#' * n, ' ' * (width - n)))
+		sys.stdout.write("\n")
+		print("Done.")
+		t2 = process_time()
+		print('Took {0:.3f} seconds'.format(t2-t1))
+		return sampler
+	
 	def fit(self):
 		'''
 		quick way to run whole fitting + MCMC process
 		returns list of obtained parameters and uncertainties
 		'''
 		result = self.minimize()
-		n = len(result)
-		p0s = [result[j] + .1 * random.randn(self.n_dim) for j in range(n) for i in range(int(self.n_walkers/n))]	# initialize walkers in a ball around best fits
-		self.chain = self.mcmc(p0s)
+		n = min(len(result), self.n_temps)
+		self.n_temps = n
+		if n == 1:
+			p0s = [result[0] + .1 * random.randn(self.n_dim) for i in range(self.n_walkers)]	# initialize walkers in a ball around best fit
+			self.sampler = self.mcmc(p0s)
+			self.chain = self.sampler.chain
+		else:
+			p0s = [[result[j] + .1 * random.randn(self.n_dim) for i in range(self.n_walkers)] for j in range(n)]	# initialize walkers in n balls around best fits
+			self.sampler = self.ptmcmc(p0s)
+			self.chain = self.sampler.chain[0]
 		self.samples = self.chain[:, self.burn:, :].reshape((-1, self.n_dim))	# cut burn-in period
 		p = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]), zip(*percentile(self.samples, [16,50,84], axis=0)))	# 16th and 84th percentiles give the marginalized distributions
 		return list(p)
 	
-	def plot_min(self, ax):
+	def plot_min(self, ax=plt):
 		'''
 		nice plot of best fits
 		'''
 		ax.plot(self.x , self.y, 'r.')
 		colors = "bgycmk"
 		for i in range(len(self.yf)):
-			ax.plot(self.x, self.yf[i], colors[i])
+			ax.plot(self.x, self.yf[i], colors[i], linewidth=2, alpha=1.0-0.1*i)
+		ax.grid()
 		
 	def plot_mcmc(self):
 		'''
