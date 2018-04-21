@@ -1,16 +1,282 @@
-from numpy import *
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy.optimize import leastsq
 from scipy.cluster.vq import whiten, kmeans2
+from scipy import signal
+from astropy.stats import sigma_clip
 import emcee
 import corner
 import time
 from itertools import product
 import sys
 import warnings
+import copy
 
 warnings.filterwarnings('ignore')
+
+def eker(self, star, spot):
+    """
+    analytic model of one circular spot based on equations in Eker (1994, ApJ, 420, 373)
+    star : Star object
+    spot : Spot object
+    """
+    limb1, limb2, iratio = star.l1, star.l2, star.ir
+    inc_deg = star.inc
+    Teq = star.Teq
+    k = star.k
+    lat_deg = spot.lat
+    lon_deg = spot.lon
+    rad_deg = spot.rad
+    # convert angles from degrees to radians
+    inc = np.radians(inc_deg)
+    lam = np.radians(lon_deg)
+    bet = np.radians(lat_deg)
+    rad = np.radians(rad_deg)
+    period = Teq / (1 - k * np.sin(bet) ** 2)
+    # useful scalar quantities
+    cosrad = np.cos(rad)
+    sinrad = np.sin(rad)
+    # rotational phases
+    phase = self.x / period
+    phi = 2.0 * np.pi * phase
+    nphi = len(phi)
+    # angle the0 between two vectors originating from spot center:
+    # 1) normal to stellar surface, directed away from center of star
+    # 2) directed towards the observer
+    costhe0 = np.cos(inc) * np.sin(bet) + np.sin(inc) * np.cos(bet) *np.cos(phi - lam)
+    sinthe0 = np.sqrt(1.0 - costhe0 ** 2)
+    the0 = np.arccos(costhe0)
+    # find phases when spot is full, gibbous, crescent or occulted
+    jf = np.flatnonzero(the0 <= np.pi / 2 - rad)
+    nf = len(jf)
+    jg = np.flatnonzero(np.logical_and(the0 > np.pi / 2 - rad, the0 <= np.pi / 2))
+    ng = len(jg)
+    jc = np.flatnonzero(np.logical_and(the0 > np.pi / 2, the0 <= np.pi / 2 + rad))
+    nc = len(jc)
+    jo = np.flatnonzero(the0 > np.pi / 2 + rad)
+    no = len(jo)
+    # allocate arrays for integrals
+    ic = np.zeros(nphi)    # constant intensity term
+    il = np.zeros(nphi)    # linear intensity term
+    iq = np.zeros(nphi)    # quadratic intensity term
+    #
+    # FULL (entirely visible)
+    #
+    if nf >= 1:
+        costhe0_f = costhe0[jf]
+        sinthe0_f = sinthe0[jf]
+        ic[jf] = np.pi * np.sin(rad) ** 2 * costhe0_f
+        il[jf] = 2 * np.pi / 3 * (1 - cosrad ** 3) - \
+            np.pi * cosrad * sinrad ** 2 * sinthe0_f ** 2
+        iq[jf] = np.pi / 2 * (1 - cosrad ** 4) * costhe0_f ** 3 + \
+            3 * np.pi / 4 * sinrad ** 4 * costhe0_f * sinthe0_f ** 2
+    #
+    # GIBBOUS (more than half visible)
+    #
+    if ng >= 1:
+        the0_g = the0[jg]
+        costhe0_g = costhe0[jg]
+        sinthe0_g = sinthe0[jg]
+        cosphi0_g = - 1.0 / (tan(the0_g) * tan(rad))
+        rad0_g = abs(the0_g - np.pi / 2)
+        phi0_g = np.arccos(cosphi0_g)
+        sinphi0_g = np.sqrt(1.0 - cosphi0_g ** 2)
+        cosrad0_g = np.cos(rad0_g)
+        sinrad0_g = np.sin(rad0_g)
+        k1_g = ((np.pi - phi0_g) / 4) * (cosrad0_g ** 4 - cosrad ** 4)
+        k2_g = (sinphi0_g / 8) * (rad0_g - rad + 0.5 * (np.sin(2 * rad)
+                                                        * np.cos(2 * rad) - np.sin(2 * rad0_g) * np.cos(2 * rad0_g)))
+        k3_g = (1.0 / 8) * (np.pi - phi0_g - sinphi0_g *
+                            cosphi0_g) * (sinrad ** 4 - sinrad0_g ** 4)
+        k4_g = - (sinphi0_g - sinphi0_g ** 3 / 3) * ((3.0 / 8) * (rad - rad0_g) + (1.0 / 16)
+                                                 * (np.sin(2 * rad) * (np.cos(2 * rad) - 4) - np.sin(2 * rad0_g) * (np.cos(2 * rad0_g) - 4)))
+        cl_g = ((np.pi - phi0_g) / 3) * (cosrad ** 3 - cosrad0_g ** 3) * (1 - 3 * costhe0_g ** 2) - (np.pi - phi0_g - sinphi0_g * cosphi0_g) * (cosrad - cosrad0_g) * sinthe0_g ** 2 - \
+            (4.0 / 3) * sinphi0_g * (sinrad ** 3 - sinrad0_g ** 3) * sinthe0_g * costhe0_g - \
+            (1.0 / 3) * sinphi0_g * cosphi0_g * \
+            (cosrad ** 3 - cosrad0_g ** 3) * sinthe0_g ** 2
+        cq_g = 2 * costhe0_g ** 3 * k1_g + 6 * costhe0_g ** 2 * sinthe0_g * \
+            k2_g + 6 * costhe0_g * sinthe0_g ** 2 * k3_g + 2 * sinthe0_g ** 3 * k4_g
+        ic[jg] = phi0_g * costhe0_g * sinrad ** 2 - \
+            np.arcsin(cosrad / sinthe0_g) - 0.5 * sinthe0_g * \
+            sinphi0_g * np.sin(2 * rad) + np.pi / 2
+        il[jg] = 2 * np.pi / 3 * (1 - cosrad ** 3) - np.pi * \
+            cosrad * sinrad ** 2 * sinthe0_g ** 2 - cl_g
+        iq[jg] = np.pi / 2 * (1 - cosrad ** 4) * costhe0_g ** 3 + 3 * \
+            np.pi / 4 * sinrad ** 4 * costhe0_g * sinthe0_g ** 2 - cq_g
+    #
+    # CRESCENT (less than half visible)
+    #
+    if nc >= 1:
+        the0_c = the0[jc]
+        costhe0_c = costhe0[jc]
+        sinthe0_c = sinthe0[jc]
+        cosphi0_c = - 1.0 / (tan(the0_c) * tan(rad))
+        rad0_c = abs(the0_c - np.pi / 2)
+        phi0_c = np.arccos(cosphi0_c)
+        sinphi0_c = np.sqrt(1.0 - cosphi0_c ** 2)
+        cosrad0_c = np.cos(rad0_c)
+        sinrad0_c = np.sin(rad0_c)
+        k1_c = (phi0_c / 4) * (cosrad0_c ** 4 - cosrad ** 4)
+        k2_c = - (sinphi0_c / 8) * (rad0_c - rad + 0.5 * (np.sin(2 * rad)
+                                                          * np.cos(2 * rad) - np.sin(2 * rad0_c) * np.cos(2 * rad0_c)))
+        k3_c = (1.0 / 8) * (phi0_c + sinphi0_c * cosphi0_c) * \
+            (sinrad ** 4 - sinrad0_c ** 4)
+        k4_c = (sinphi0_c - sinphi0_c ** 3 / 3) * ((3.0 / 8) * (rad - rad0_c) + (1.0 / 16)
+                                                   * (np.sin(2 * rad) * (np.cos(2 * rad) - 4) - np.sin(2 * rad0_c) * (np.cos(2 * rad0_c) - 4)))
+        cq_c = 2 * costhe0_c ** 3 * k1_c + 6 * costhe0_c ** 2 * sinthe0_c * \
+            k2_c + 6 * costhe0_c * sinthe0_c ** 2 * k3_c + 2 * sinthe0_c ** 3 * k4_c
+        ic[jc] = phi0_c * costhe0_c * sinrad ** 2 - \
+            np.arcsin(cosrad / sinthe0_c) - 0.5 * sinthe0_c * \
+            sinphi0_c * np.sin(2 * rad) + np.pi / 2
+        il[jc] = (phi0_c / 3) * (cosrad ** 3 - cosrad0_c ** 3) * (1 - 3 * costhe0_c ** 2) - (phi0_c + sinphi0_c * cosphi0_c) * (cosrad - cosrad0_c) * sinthe0_c ** 2 + (
+            4.0 / 3) * sinphi0_c * (sinrad ** 3 - sinrad0_c ** 3) * sinthe0_c * costhe0_c + (1.0 / 3) * sinphi0_c * cosphi0_c * (cosrad ** 3 - cosrad0_c ** 3) * sinthe0_c ** 2
+        iq[jc] = cq_c
+    #
+    # OCCULTED (back of the star)
+    #
+    if no >= 1:
+        ic[jo] = 0.0
+        il[jo] = 0.0
+        iq[jo] = 0.0
+    # calculate lightcurve (equation 12c from Eker, 1994)
+    lc = 1.0 + (iratio - 1.0) / (np.np.pi * (1.0 - limb1 / 3.0 + limb2 / 6.0)) * (
+        (1.0 - limb1 + limb2) * ic + (limb1 - 2.0 * limb2) * il + limb2 * iq)
+    return lc
+
+
+class Spot(object):
+    """
+    Implements a simple class for a generic spot
+    
+    Attributes
+    ----------
+    period : 
+    rad : 
+    lat : 
+    lon : 
+    """
+    def __init__(self, period, rad, lat, lon):
+        self.period = period
+        self.rad = rad
+        self.lat = lat
+        self.lon = lon
+
+class LightCurve(object):
+    """
+    Implements a simple class for a generic light curve
+    
+    Attributes
+    ----------
+    time : array-like
+    flux : array-like
+    """
+    def __init__(self, time, flux):
+        self.time = time
+        self.flux = flux
+
+    def normalize(self):
+        """
+        Returns a normalized version of the lightcurve
+        obtained dividing `flux` by the median flux
+        
+        Returns
+        -------
+        lc : LightCurve object 
+        """
+        lc = copy.copy(self)
+        lc.flux = lc.flux / np.nanmedian(lc.flux)
+        return lc
+        
+    def remove_nans(self):
+        """
+        """
+        lc = copy.copy(self)
+        nanmask = np.isnan(lc.flux)
+        lc.time = self.time[~nanmask]
+        lc.flux = self.flux[~nanmask]
+        return lc
+        
+    def remove_outliers(self, sigma=5., return_mask=False):
+        """
+        """
+        lc = copy.copy(self)
+        outlier_mask = sigma_clip(data=lc.flux, sigma=sigma).mask
+        lc.time = self.time[~outlier_mask]
+        lc.flux = self.flux[~outlier_mask]
+        if return_mask:
+            return lc, outlier_mask
+        return lc
+        
+    def bin(self, binsize=13, method='mean'):
+        """
+        """
+        available_methods = ['mean', 'median']
+        if method not in available_methods:
+            raise ValueError("method must be one of: {}".format(available_methods))
+        methodf = np.__dict__['nan' + method]
+        n_bins = self.time.size // binsize
+        lc = copy.copy(self)
+        lc.time = np.array([methodf(a) for a in np.array_split(self.time, n_bins)])
+        lc.flux = np.array([methodf(a) for a in np.array_split(self.flux, n_bins)])
+        return lc
+    
+    def plot(self, ax=None):
+        """
+        """
+        if ax is None:
+            fig, ax = plt.subplots(1)
+        ax.plot(self.time, self.flux, 'kx')
+        return ax
+        
+    def activity_proxy(self, method='dv'):
+        """
+        """
+        lc = self.normalize()
+        lc = lc.remove_nans()
+        rms = np.sqrt(np.mean(np.square(lc.flux)))
+        return np.sqrt(8) * rms
+        
+    def flatten(self, window_length=101, polyorder=3, **kwargs):
+        """
+        Removes low-frequency trend using scipy's Savitzky-Golay filter
+        """
+        clean_lc = self.remove_nans()
+        trend = signal.savgol_filter(x=clean_lc.flux, 
+                                    window_length=window_length, 
+                                    polyorder=polyorder, **kwargs)
+        flat_lc = copy.copy(self)
+        flat_lc.flux = clean_lc.flux / trend
+        return flat_lc
+        
+    def fold(self, period, phase=0.0):
+        """
+        """
+        fold_time = ((self.time - phase) / period) % 1
+        ids = np.argsort(fold_time)
+        return LightCurve(fold_time[ids], self.flux[ids])
+    
+class Star(object):
+    """
+    Implements a simple class for a generic star
+    
+    Attributes
+    ----------
+    inc : 
+    Teq : 
+    k : 
+    l1 : 
+    l2 : 
+    ir : 
+    """
+    def __init__(self, inc, Teq, k, l1=0.68, l2=0.00, ir=0.22):
+        self.inc = inc
+        self.Teq = Teq
+        self.k = k
+        self.l1 = l1
+        self.l2 = l2
+        self.ir = ir
+        self.spots = np.array([], dtype=Spot)
 
 
 class Modeler(object):
@@ -52,7 +318,7 @@ class Modeler(object):
     def eker(self, theta):
         """
         analytic model of one circular spot based on equations in Eker (1994, ApJ, 420, 373)
-        theta[0..5]:	star params (inc, Teq, k) + spot params (lat, lon, rad)
+        theta:	star params (inc, Teq, k) + spot params (lat, lon, rad)
         """
         limb1, limb2, iratio = self.l1, self.l2, self.ir
         inc_deg, Teq, k, lat_deg, lon_deg, rad_deg = theta
@@ -61,10 +327,10 @@ class Modeler(object):
         lam = radians(lon_deg)
         bet = radians(lat_deg)
         rad = radians(rad_deg)
-        period = Teq / (1 - k * sin(bet) ** 2)  # differential rotation
+        period = Teq / (1 - k * np.sin(bet) ** 2)
         # useful scalar quantities
-        cosrad = cos(rad)
-        sinrad = sin(rad)
+        cosrad = np.cos(rad)
+        sinrad = np.sin(rad)
         # rotational phases
         phase = self.x / period
         phi = 2.0 * pi * phase
@@ -72,7 +338,7 @@ class Modeler(object):
         # angle the0 between two vectors originating from spot center:
         # 1) normal to stellar surface, directed away from center of star
         # 2) directed towards the observer
-        costhe0 = cos(inc) * sin(bet) + sin(inc) * cos(bet) * cos(phi - lam)
+        costhe0 = np.cos(inc) * np.sin(bet) + np.sin(inc) * np.cos(bet) * np.cos(phi - lam)
         sinthe0 = sqrt(1.0 - costhe0 ** 2)
         the0 = arccos(costhe0)
         # find phases when spot is full, gibbous, crescent or occulted
@@ -94,7 +360,7 @@ class Modeler(object):
         if nf >= 1:
             costhe0_f = costhe0[jf]
             sinthe0_f = sinthe0[jf]
-            ic[jf] = pi * sin(rad) ** 2 * costhe0_f
+            ic[jf] = pi * np.sin(rad) ** 2 * costhe0_f
             il[jf] = 2 * pi / 3 * (1 - cosrad ** 3) - \
                 pi * cosrad * sinrad ** 2 * sinthe0_f ** 2
             iq[jf] = pi / 2 * (1 - cosrad ** 4) * costhe0_f ** 3 + \
@@ -110,15 +376,15 @@ class Modeler(object):
             rad0_g = abs(the0_g - pi / 2)
             phi0_g = arccos(cosphi0_g)
             sinphi0_g = sqrt(1.0 - cosphi0_g ** 2)
-            cosrad0_g = cos(rad0_g)
-            sinrad0_g = sin(rad0_g)
+            cosrad0_g = np.cos(rad0_g)
+            sinrad0_g = np.sin(rad0_g)
             k1_g = ((pi - phi0_g) / 4) * (cosrad0_g ** 4 - cosrad ** 4)
             k2_g = (sinphi0_g / 8) * (rad0_g - rad + 0.5 * (sin(2 * rad)
-                                                            * cos(2 * rad) - sin(2 * rad0_g) * cos(2 * rad0_g)))
+                                                            * np.cos(2 * rad) - np.sin(2 * rad0_g) * np.cos(2 * rad0_g)))
             k3_g = (1.0 / 8) * (pi - phi0_g - sinphi0_g *
                                 cosphi0_g) * (sinrad ** 4 - sinrad0_g ** 4)
             k4_g = - (sinphi0_g - sinphi0_g ** 3 / 3) * ((3.0 / 8) * (rad - rad0_g) + (1.0 / 16)
-                                                     * (sin(2 * rad) * (cos(2 * rad) - 4) - sin(2 * rad0_g) * (cos(2 * rad0_g) - 4)))
+                                                     * (sin(2 * rad) * (cos(2 * rad) - 4) - np.sin(2 * rad0_g) * (cos(2 * rad0_g) - 4)))
             cl_g = ((pi - phi0_g) / 3) * (cosrad ** 3 - cosrad0_g ** 3) * (1 - 3 * costhe0_g ** 2) - (pi - phi0_g - sinphi0_g * cosphi0_g) * (cosrad - cosrad0_g) * sinthe0_g ** 2 - \
                 (4.0 / 3) * sinphi0_g * (sinrad ** 3 - sinrad0_g ** 3) * sinthe0_g * costhe0_g - \
                 (1.0 / 3) * sinphi0_g * cosphi0_g * \
@@ -127,7 +393,7 @@ class Modeler(object):
                 k2_g + 6 * costhe0_g * sinthe0_g ** 2 * k3_g + 2 * sinthe0_g ** 3 * k4_g
             ic[jg] = phi0_g * costhe0_g * sinrad ** 2 - \
                 arcsin(cosrad / sinthe0_g) - 0.5 * sinthe0_g * \
-                sinphi0_g * sin(2 * rad) + pi / 2
+                sinphi0_g * np.sin(2 * rad) + pi / 2
             il[jg] = 2 * pi / 3 * (1 - cosrad ** 3) - pi * \
                 cosrad * sinrad ** 2 * sinthe0_g ** 2 - cl_g
             iq[jg] = pi / 2 * (1 - cosrad ** 4) * costhe0_g ** 3 + 3 * \
@@ -143,20 +409,20 @@ class Modeler(object):
             rad0_c = abs(the0_c - pi / 2)
             phi0_c = arccos(cosphi0_c)
             sinphi0_c = sqrt(1.0 - cosphi0_c ** 2)
-            cosrad0_c = cos(rad0_c)
-            sinrad0_c = sin(rad0_c)
+            cosrad0_c = np.cos(rad0_c)
+            sinrad0_c = np.sin(rad0_c)
             k1_c = (phi0_c / 4) * (cosrad0_c ** 4 - cosrad ** 4)
             k2_c = - (sinphi0_c / 8) * (rad0_c - rad + 0.5 * (sin(2 * rad)
-                                                              * cos(2 * rad) - sin(2 * rad0_c) * cos(2 * rad0_c)))
+                                                              * np.cos(2 * rad) - np.sin(2 * rad0_c) * np.cos(2 * rad0_c)))
             k3_c = (1.0 / 8) * (phi0_c + sinphi0_c * cosphi0_c) * \
                 (sinrad ** 4 - sinrad0_c ** 4)
             k4_c = (sinphi0_c - sinphi0_c ** 3 / 3) * ((3.0 / 8) * (rad - rad0_c) + (1.0 / 16)
-                                                       * (sin(2 * rad) * (cos(2 * rad) - 4) - sin(2 * rad0_c) * (cos(2 * rad0_c) - 4)))
+                                                       * (sin(2 * rad) * (cos(2 * rad) - 4) - np.sin(2 * rad0_c) * (cos(2 * rad0_c) - 4)))
             cq_c = 2 * costhe0_c ** 3 * k1_c + 6 * costhe0_c ** 2 * sinthe0_c * \
                 k2_c + 6 * costhe0_c * sinthe0_c ** 2 * k3_c + 2 * sinthe0_c ** 3 * k4_c
             ic[jc] = phi0_c * costhe0_c * sinrad ** 2 - \
                 arcsin(cosrad / sinthe0_c) - 0.5 * sinthe0_c * \
-                sinphi0_c * sin(2 * rad) + pi / 2
+                sinphi0_c * np.sin(2 * rad) + pi / 2
             il[jc] = (phi0_c / 3) * (cosrad ** 3 - cosrad0_c ** 3) * (1 - 3 * costhe0_c ** 2) - (phi0_c + sinphi0_c * cosphi0_c) * (cosrad - cosrad0_c) * sinthe0_c ** 2 + (
                 4.0 / 3) * sinphi0_c * (sinrad ** 3 - sinrad0_c ** 3) * sinthe0_c * costhe0_c + (1.0 / 3) * sinphi0_c * cosphi0_c * (cosrad ** 3 - cosrad0_c ** 3) * sinthe0_c ** 2
             iq[jc] = cq_c
@@ -179,12 +445,12 @@ class Modeler(object):
         """
         ndim = len(theta)
         nspots = int((ndim - 3) / 3)
-        y = self.eker(theta[:6])
-        for i in range(2, nspots + 1):
+        y = ones_like(self.x)
+        for i in range(1, nspots + 1):
             y += -1 + self.eker(append(theta[:3], theta[3*i:3*(i+1)]))
         return y
 
-    def normalize(self):
+    def normalize(self, n_bins=500):
         """
         x and y corrections before any fitting takes place
         """
@@ -192,17 +458,17 @@ class Modeler(object):
         good = ~isnan(self.y)   #logical_and(~isnan(self.y), self.x <= 45)  # removed NaNs
         self.x = self.x[good]
         self.y = self.y[good]
-        self.y /= max(self.y)   # flux normalized
-        m = median(self.y)
-        rms = sqrt(mean(square(self.y/m-1)))
-        r1 = m + m*sqrt(2)*rms
-        self.y /= r1
-        k = int(len(self.y) / 500)
-        if len(self.y) > 500:
-            chosen = [i % k == 0 for i in
-                      range(len(self.y))]   # maximum number of samples is 500 for faster computation
-            self.x = self.x[chosen]
-            self.y = self.y[chosen]
+        # maximum number of samples is 500 for faster computation
+        cadence = max(self.x) / n_bins
+        f = zeros(n_bins)
+        t = zeros(n_bins)
+        for i in range(n_bins):
+            t[i] = i*cadence
+            f[i] = mean(self.y[logical_and(self.x < (i+1)*cadence, self.x > i*cadence)])
+        self.x = t[~isnan(f)]
+        self.y = f[~isnan(f)]
+        # flux normalized
+        self.y /= sorted(self.y)[int(.98*len(self.y))]
 
     def vsini(self, i, T):
         """
@@ -212,8 +478,8 @@ class Modeler(object):
         # solar radius = 695700 km
         # 1 day = 86400 seconds
         # 2 * pi * 695700 / 86400 = 50.592731692185623
-        return [50.592731692185623 * self.rmin * sin(i * pi / 180) / T,
-                50.592731692185623 * self.rmax * sin(i * pi / 180) / T]
+        return [50.592731692185623 * self.rmin * np.sin(i * pi / 180) / T,
+                50.592731692185623 * self.rmax * np.sin(i * pi / 180) / T]
 
     def lnprior(self, theta):
         """
@@ -295,7 +561,7 @@ class Modeler(object):
         # sort fits with respect to chi
         sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
         # let all parameters have same variance (enable clustering)
-        optsmat = whiten(array(opts[:int(0.75 * len(opts))]))
+        optsmat = whiten(array(opts))
         # find (n_clusters) centroids using kmeans
         __, label = kmeans2(optsmat, self.n_clusters, iter=20, minit='points')
         label = list(label)
@@ -343,20 +609,25 @@ class Modeler(object):
         print('TOTAL: {0:.2f} s'.format(t4-t1))
         return opts
 
-    def spacedvals(self):
+    def spacedvals(self, method='default'):
         """
         defines (n_spaced)**6 initial points spaced in allowed parameter region
         """
         p0s = []
-        mins = [self.inc_min, self.Teq_min, self.k_min,
-                self.lat_min, self.lon_min, self.rad_min]
-        maxs = [self.inc_max, self.Teq_max, self.k_max,
-                self.lat_max, self.lon_max, self.rad_max]
-        for i in range(6):
-            p0s.append(arange(mins[i] + (maxs[i] - mins[i]) / (2 * self.n_spaced), maxs[i],
-                              (maxs[i] - mins[i]) / self.n_spaced))
-        q = list(product(*p0s))
-        random.shuffle(q)
+        mins = array([self.inc_min, self.Teq_min, self.k_min,
+                self.lat_min, self.lon_min, self.rad_min])
+        maxs = array([self.inc_max, self.Teq_max, self.k_max,
+                self.lat_max, self.lon_max, self.rad_max])
+        if method == 'random':
+            p0s = random.rand(self.n_spaced, 6)
+            q = zeros_like(p0s)
+            q = p0s * (maxs-mins) + mins
+        else:
+            for i in range(6):
+                p0s.append(arange(mins[i] + (maxs[i] - mins[i]) / (2 * self.n_spaced), maxs[i],
+                                  (maxs[i] - mins[i]) / self.n_spaced))
+            q = list(product(*p0s))
+            random.shuffle(q)
         return q
 
     def minimize(self):
@@ -365,7 +636,7 @@ class Modeler(object):
         saves best fits for plotting if required
         """
         self.normalize()
-        p0s = self.spacedvals()
+        p0s = self.spacedvals(method='random')
         if self.n_spots > 1:
             opts = self.multifit(p0s)
         else:
@@ -512,3 +783,4 @@ class Modeler(object):
             corner.corner(self.samples[:,3*i:3*(i+1)], labels=lab[3*i:3*(i+1)], quantiles=[0.16, 0.5, 0.84], show_titles=True,
                       title_kwargs={"fontsize": 12})
         plt.show()
+
