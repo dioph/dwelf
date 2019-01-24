@@ -97,7 +97,7 @@ class Modeler(object):
         nspots = int((ndim - 3) / 3)
         y = np.ones_like(self.x)
         for i in range(1, nspots + 1):
-            y += -1 + eker(np.append(theta[:3], theta[3 * i:3 * (i + 1)]))
+            y += -1 + eker(self.x, np.append(theta[:3], theta[3 * i:3 * (i + 1)]), l1=self.l1, l2=self.l2, ir=self.ir)
         return y
 
     def normalize(self, n_bins=500):
@@ -119,8 +119,7 @@ class Modeler(object):
         self.x = t[~np.isnan(f)]
         self.y = f[~np.isnan(f)]
         # normalize flux
-        if np.abs(np.mean(self.y)) > .01:
-            self.y /= np.mean(self.y)
+        self.y /= np.max(self.y)
 
     def vsini(self, i, T):
         """Calculates minimum and maximum v sin i given inclination and period at equator.
@@ -218,7 +217,7 @@ class Modeler(object):
         sses = []
         for p0 in p0s:
             p1 = p0[len(star_params):]
-            fps = leastsq(func=self.eps, x0=p1, args=star_params, maxfev=n_iter)
+            fps = leastsq(func=self.eps, x0=p1, args=star_params, maxfev=n_iter)[0]
             if not any(np.isnan(fps)):
                 opts.append(np.append(star_params, fps))
                 sses.append(self.chi(fps, star_params))
@@ -306,13 +305,10 @@ class Modeler(object):
         """Defines (n_spaced)**6 initial points spaced in allowed parameter region
         """
         p0s = []
-        mins = np.array([self.inc_min, self.Teq_min, self.k_min,
-                         self.lat_min, self.lon_min, self.rad_min])
-        maxs = np.array([self.inc_max, self.Teq_max, self.k_max,
-                         self.lat_max, self.lon_max, self.rad_max])
+        mins = np.array([self.inc_min, self.Teq_min, self.k_min, self.lat_min, self.lon_min, self.rad_min])
+        maxs = np.array([self.inc_max, self.Teq_max, self.k_max, self.lat_max, self.lon_max, self.rad_max])
         if method == 'random':
-            p0s = np.random.rand(self.n_spaced, 6)
-            q = np.zeros_like(p0s)
+            p0s = np.random.rand(self.n_spaced ** 6, 6)
             q = p0s * (maxs - mins) + mins
         else:
             for i in range(6):
