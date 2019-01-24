@@ -1,0 +1,49 @@
+lines.linewidth :   1.0
+lines.linestyle :   -
+lines.color     :   black
+
+font.family :   sans-serif
+font.weight :   normal
+font.size   :   12.0
+
+text.color          :   black
+text.usetex         :   True
+text.latex.preamble :   \usepackage{cmbright}
+
+axes.edgecolor      :   black
+axes.facecolor      :   white
+axes.linewidth      :   1.0
+axes.grid           :   False
+axes.titlesize      :   x-large
+axes.labelsize      :   x-large
+axes.labelweight    :   normal
+axes.labelcolor     :   black
+
+axes.formatter.limits   :   (-4, 4)
+
+xtick.labelsize     :   x-large
+xtick.direction     :   in
+xtick.top           :   True
+xtick.major.size    :   7
+xtick.major.pad     :   6
+xtick.major.width   :   1.0
+xtick.minor.size    :   7
+xtick.minor.pad     :   6
+xtick.minor.width   :   1.0
+xtick.minor.visible :   True
+
+ytick.labelsize     :   x-large
+ytick.direction     :   in
+ytick.right         :   True
+ytick.major.size    :   7
+ytick.major.pad     :   6
+ytick.major.width   :   1.0
+ytick.minor.size    :   7
+ytick.minor.pad     :   6
+ytick.minor.width   :   1.0
+ytick.minor.visible :   True
+
+legend.numpoints    :   1
+legend.fontsize     :   x-large
+legend.shadow       :   False
+legend.frameon      :   False
