@@ -8,7 +8,6 @@ Stellar parameter determination based on Spot Modelling
 ## Example
 ```python
 from dwelf import *
-import matplotlib.pyplot as plt
 from astropy.io import ascii
 
 filename = PACKAGEDIR + '/data/kappaCeti2003.csv'
@@ -29,7 +28,5 @@ v_min = sum(model.vsini(params[0][0]-params[0][2], params[1][0]+params[1][1]))/2
 v_max = sum(model.vsini(params[0][0]+params[0][1], params[1][0]-params[1][2]))/2
 print('v sin i: {0:.2f} -- {1:.2f}'.format(v_min, v_max))
 model.plot_min()
-plt.show()
-model.plot_mcmc()
-
+plot_mcmc(model.samples)
 ```

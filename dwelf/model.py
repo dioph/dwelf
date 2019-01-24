@@ -1,11 +1,8 @@
-import sys
 import time
 from itertools import product
 
-import corner
 import emcee
 import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
 from scipy.cluster.vq import whiten, kmeans2
 from scipy.optimize import leastsq
 from tqdm.auto import tqdm
@@ -417,37 +414,3 @@ class Modeler(object):
                 plt.plot(self.x, self.y, 'r.')
                 plt.plot(self.x, self.yf[i], colors[i], linewidth=2)
             plt.show()
-
-    def plot_mcmc(self):
-        """MCMC standard visualization
-        """
-        lab = []
-        fig, axes = plt.subplots(self.n_spots + 1, 3, sharex='True')
-        axes[0][0].plot(self.chain[:, :, 0].T, color="k", alpha=0.4)
-        axes[0][0].set_ylabel("$i$")
-        lab.append("$i$")
-        axes[0][1].plot(self.chain[:, :, 1].T, color="k", alpha=0.4)
-        axes[0][1].set_ylabel("$P_{eq}$")
-        lab.append("$P_{eq}$")
-        axes[0][2].plot(self.chain[:, :, 2].T, color="k", alpha=0.4)
-        axes[0][2].set_ylabel("$k$")
-        lab.append("$k$")
-        for i in range(1, self.n_spots + 1):
-            axes[i][0].plot(self.chain[:, :, 3 * i].T, color="k", alpha=0.4)
-            axes[i][0].set_ylabel("$\\beta_{0}$".format(i))
-            lab.append("$\\beta_{0}$".format(i))
-            axes[i][1].plot(self.chain[:, :, 3 * i + 1].T,
-                            color="k", alpha=0.4)
-            axes[i][1].set_ylabel("$\lambda_{0}$".format(i))
-            lab.append("$\lambda_{0}$".format(i))
-            axes[i][2].plot(self.chain[:, :, 3 * i + 2].T,
-                            color="k", alpha=0.4)
-            axes[i][2].set_ylabel("$R_{0}$".format(i))
-            lab.append("$R_{0}$".format(i))
-        corner.corner(self.samples[:, :3], labels=lab[:3], quantiles=[0.16, 0.5, 0.84], show_titles=True,
-                      title_kwargs={"fontsize": 12})
-        for i in range(1, self.n_spots + 1):
-            corner.corner(self.samples[:, 3 * i:3 * (i + 1)], labels=lab[3 * i:3 * (i + 1)],
-                          quantiles=[0.16, 0.5, 0.84], show_titles=True,
-                          title_kwargs={"fontsize": 12})
-        plt.show()

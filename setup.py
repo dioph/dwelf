@@ -15,7 +15,7 @@ setuptools.setup(
     url="https://github.com/dioph/dwelf",
     packages=setuptools.find_packages(),
     install_requires=['numpy>=1.11', 'scipy>=0.19.0', 'astropy>=1.3',
-                      'matplotlib', 'emcee', 'corner'],
+                      'matplotlib', 'emcee', 'tqdm'],
     classifiers=(
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
