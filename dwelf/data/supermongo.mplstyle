@@ -19,8 +19,6 @@ axes.labelsize      :   x-large
 axes.labelweight    :   normal
 axes.labelcolor     :   black
 
-axes.formatter.limits   :   (-4, 4)
-
 xtick.labelsize     :   x-large
 xtick.direction     :   in
 xtick.top           :   True
