@@ -13,7 +13,7 @@ from . import MPLSTYLE
 
 class Modeler(object):
     def __init__(self, l1=0.68, l2=0.00, ir=0.22, x=np.arange(0, 50, .1), y=np.ones(500), rmin=0.5, rmax=1.5,
-                 inc_min=0, inc_max=90, Teq_min=1, Teq_max=50, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90,
+                 inc_min=0, inc_max=90, Peq_min=1, Peq_max=50, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90,
                  lon_min=0, lon_max=360, rad_min=5, rad_max=30, stdv=0.001, n_spots=2, n_iter=20, n_clusters=30,
                  burn=100, n_walkers=120, n_steps=1000, v_min=0, v_max=10, threshratio=2, n_temps=1, thin=1,
                  n_spaced=3, savefile=None):
@@ -28,7 +28,7 @@ class Modeler(object):
         y: flux array
         rmin, rmax: stellar radius bounds (solar radius)
         inc_min, inc_max: stellar inclination bounds (deg)
-        Teq_min, Teq_max: equatorial rotation period bounds (day)
+        Peq_min, Peq_max: equatorial rotation period bounds (day)
         k_min, k_max: differential rotation coefficient bounds
         lat_min, lat_max: spot latitude bounds (deg)
         lon_min, lon_max: spot longitude bounds (deg)
@@ -56,8 +56,8 @@ class Modeler(object):
         self.rmax = rmax
         self.inc_min = inc_min
         self.inc_max = inc_max
-        self.Teq_min = Teq_min
-        self.Teq_max = Teq_max
+        self.Peq_min = Peq_min
+        self.Peq_max = Peq_max
         self.k_min = k_min
         self.k_max = k_max
         self.lat_min = lat_min
@@ -87,7 +87,7 @@ class Modeler(object):
 
         Parameters
         ----------
-        theta:	star params (inc, Teq, k) + spot params (lat, lon, rad) for each spot
+        theta:	star params (inc, Peq, k) + spot params (lat, lon, rad) for each spot
 
         Returns
         -------
@@ -144,7 +144,7 @@ class Modeler(object):
 
         Parameters
         ----------
-        theta:	star params (inc, Teq, k) + spot params (lat, lon, rad) for each spot
+        theta:	star params (inc, Peq, k) + spot params (lat, lon, rad) for each spot
 
         Returns
         -------
@@ -153,13 +153,13 @@ class Modeler(object):
         """
         ndim = len(theta)
         nspots = int((ndim - 3) / 3)
-        inc, Teq, k = theta[:3]
-        v = self.vsini(inc, Teq)
+        inc, Peq, k = theta[:3]
+        v = self.vsini(inc, Peq)
         # restrict v sin i
         if self.v_max < v[0] or v[1] < self.v_min:
             return -np.inf
         # restrict star params
-        if not (self.inc_min < inc < self.inc_max and self.Teq_min < Teq < self.Teq_max and
+        if not (self.inc_min < inc < self.inc_max and self.Peq_min < Peq < self.Peq_max and
                 self.k_min < k < self.k_max):
             return -np.inf
         # restrict spot params
@@ -204,7 +204,7 @@ class Modeler(object):
         ----------
         p0s: array of initial guesses
         n_iter: maximum number of function evaluations for the L-M algorithm
-        star_params: (inc, Teq, k), required for multiple spots fitting (fixed star)
+        star_params: (inc, Peq, k), required for multiple spots fitting (fixed star)
 
         Returns
         -------
@@ -229,7 +229,7 @@ class Modeler(object):
         Parameters
         ----------
         p0s: array of initial guesses
-        star_params: (inc, Teq, k)
+        star_params: (inc, Peq, k)
 
         Returns
         -------
@@ -305,8 +305,8 @@ class Modeler(object):
         """Defines (n_spaced)**6 initial points spaced in allowed parameter region
         """
         p0s = []
-        mins = np.array([self.inc_min, self.Teq_min, self.k_min, self.lat_min, self.lon_min, self.rad_min])
-        maxs = np.array([self.inc_max, self.Teq_max, self.k_max, self.lat_max, self.lon_max, self.rad_max])
+        mins = np.array([self.inc_min, self.Peq_min, self.k_min, self.lat_min, self.lon_min, self.rad_min])
+        maxs = np.array([self.inc_max, self.Peq_max, self.k_max, self.lat_max, self.lon_max, self.rad_max])
         if method == 'random':
             p0s = np.random.rand(self.n_spaced ** 6, 6)
             q = p0s * (maxs - mins) + mins
