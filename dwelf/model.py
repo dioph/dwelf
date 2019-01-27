@@ -4,14 +4,260 @@ from itertools import product
 import emcee
 import matplotlib.patches as mpatches
 from scipy.cluster.vq import whiten, kmeans2
-from scipy.optimize import leastsq
+from scipy.optimize import leastsq, minimize
 from tqdm.auto import tqdm
+from pymultinest.solve import  solve
 
 from .utils import *
 from . import MPLSTYLE
 
 
-class Modeler(object):
+class MaculaModeler(object):
+    def __init__(self, t, y, nspots, inc=None, Peq=None, k2=None, k4=None, c1=None, c2=None, c3=None, c4=None,
+                 d1=None, d2=None, d3=None, d4=None, long=None, lat=None, alpha=None, fspot=None, tmax=None,
+                 life=None, ingress=None, egress=None, U=None, B=None, tstart=None, tend=None):
+        self.t = t
+        self.y = y
+        self.nspots = nspots
+        self.inc = inc
+        self.Peq = Peq
+        self.k2 = k2
+        self.k4 = k4
+        self.c1 = c1
+        self.c2 = c2
+        self.c3 = c3
+        self.c4 = c4
+        self.d1 = d1
+        self.d2 = d2
+        self.d3 = d3
+        self.d4 = d4
+        self.long = long
+        self.lat = lat
+        self.alpha = alpha
+        self.fspot = fspot
+        self.tmax = tmax
+        self.life = life
+        self.ingress = ingress
+        self.egress = egress
+        self.U = U
+        self.B = B
+        self.tstart = tstart
+        self.tend = tend
+
+        if self.inc is None:
+            self.inc = np.array([0, np.pi/2])
+        if self.Peq is None:
+            self.Peq = np.array([0, 50])
+        if self.k2 is None:
+            self.k2 = np.array([-1, 1])
+        if self.k4 is None:
+            self.k4 = np.array([-1, 1])
+        if self.c1 is None:
+            self.c1 = np.array([-1, 1])
+        if self.c2 is None:
+            self.c2 = np.array([-1, 1])
+        if self.c3 is None:
+            self.c3 = np.array([-1, 1])
+        if self.c4 is None:
+            self.c4 = np.array([-1, 1])
+        if self.d1 is None:
+            self.d1 = np.array([-1, 1])
+        if self.d2 is None:
+            self.d2 = np.array([-1, 1])
+        if self.d3 is None:
+            self.d3 = np.array([-1, 1])
+        if self.d4 is None:
+            self.d4 = np.array([-1, 1])
+
+        if self.long is None:
+            self.long = np.array([[-np.pi, np.pi] for _ in range(nspots)])
+        if self.lat is None:
+            self.lat = np.array([[-np.pi/2, np.pi/2] for _ in range(nspots)])
+        if self.alpha is None:
+            self.alpha = np.array([[0, np.pi/4] for _ in range(nspots)])
+        if self.fspot is None:
+            self.fspot = np.array([[0, 2] for _ in range(nspots)])
+        if self.tmax is None:
+            self.tmax = np.array([[t[0], t[-1]] for _ in range(nspots)])
+        if self.life is None:
+            self.life = np.array([[0, t[-1]-t[0]] for _ in range(nspots)])
+        if self.ingress is None:
+            self.ingress = np.array([[0, t[-1]-t[0]] for _ in range(nspots)])
+        if self.egress is None:
+            self.egress = np.array([[0, t[-1]-t[0]] for _ in range(nspots)])
+
+        self.mmax = np.size(self.tstart)
+        if self.U is None:
+            self.U = np.array([[.9, 1.1] for _ in range(self.mmax)])
+        if self.B is None:
+            self.B = np.array([[.9, 1.1] for _ in range(self.mmax)])
+
+        self.fixed_params = {}
+        self.fit_names = []
+        for key, val in self.parameters.items():
+            if key in self.star_pars.keys():
+                if np.ndim(val) < 1:
+                    self.fixed_params[key] = val
+                else:
+                    self.fit_names.append(key)
+            else:
+                if np.ndim(val) <= 1:
+                    self.fixed_params[key] = val
+                else:
+                    self.fit_names.append(key)
+        self.bounds = []
+        for key in self.fit_names:
+            bounds = getattr(self, key)
+            if key in self.star_pars.keys():
+                bounds = np.array([bounds])
+            for b in bounds:
+                self.bounds.append(b)
+        self.bounds = np.array(self.bounds)
+
+    @property
+    def parameters(self):
+        return {**self.star_pars, **self.spot_pars, **self.inst_pars}
+
+    @property
+    def star_pars(self):
+        return dict(inc=self.inc, Peq=self.Peq, k2=self.k2, k4=self.k4, c1=self.c1, c2=self.c2,
+                    c3=self.c3, c4=self.c4, d1=self.d1, d2=self.d2, d3=self.d3, d4=self.d4)
+
+    @property
+    def spot_pars(self):
+        return dict(long=self.long, lat=self.lat, alpha=self.alpha, fspot=self.fspot,
+                    tmax=self.tmax, life=self.life, ingress=self.ingress, egress=self.egress)
+
+    @property
+    def inst_pars(self):
+        return dict(U=self.U, B=self.B)
+
+    def predict(self, t, theta):
+        fit_params = self.get_fit_params(theta)
+        theta_full = {**fit_params, **self.fixed_params}
+        theta_star = np.array([theta_full[key] for key in self.star_pars.keys()])
+        theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
+        theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
+        yf = macula(t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend)
+        return yf
+
+    def get_fit_params(self, theta):
+        fit_params = {}
+        i = 0
+        for key in self.fit_names:
+            if key in self.spot_pars.keys():
+                fit_params[key] = np.array(theta[i:i + self.nspots])
+                i += self.nspots
+            elif key in self.inst_pars.keys():
+                fit_params[key] = np.array(theta[i:i + self.mmax])
+                i += self.mmax
+            else:
+                fit_params[key] = theta[i]
+                i += 1
+        return fit_params
+
+    def lnprior(self, theta):
+        fit_params = self.get_fit_params(theta)
+        for key, val in fit_params.items():
+            bounds = getattr(self, key)
+            if key in self.star_pars.keys():
+                if not (bounds[0] < val < bounds[1]):
+                    return -np.inf
+            else:
+                for bound, v in zip(bounds, val):
+                    if not (bound[0] < v < bound[1]):
+                        return -np.inf
+        return 0.
+
+    def chi(self, theta):
+        fit_params = self.get_fit_params(theta)
+        theta_full = {**fit_params, **self.fixed_params}
+        theta_star = np.array([theta_full[key] for key in self.star_pars.keys()])
+        theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
+        theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
+        yf = macula(self.t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend)
+        sse = np.sum(np.square(yf - self.y)) / np.std(self.y)
+        return sse
+
+    def lnprob(self, theta):
+        lp = self.lnprior(theta)
+        if not np.isfinite(lp):
+            return -np.inf
+        return lp - self.chi(theta)
+
+    def grad_chi(self, theta):
+        fit_params = self.get_fit_params(theta)
+        theta_full = {**fit_params, **self.fixed_params}
+        theta_star = np.array([theta_full[key] for key in self.star_pars.keys()])
+        theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
+        theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
+        result = macula(self.t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend,
+                        full_output=True, derivatives=True)
+        yf = result[0]
+        dy_star = result[1]
+        dy_spot = result[2]
+        dy_inst = result[3]
+        dic_star = {}
+        for i, key in enumerate(self.star_pars.keys()):
+            dic_star[key] = dy_star[:, i]
+        dic_spot = {}
+        for i, key in enumerate(self.spot_pars.keys()):
+            dic_star[key] = dy_spot[:, i]
+        dic_inst = {}
+        for i, key in enumerate(self.inst_pars.keys()):
+            dic_inst[key] = dy_inst[:, i]
+        dic_full = {**dic_star, **dic_spot, **dic_inst}
+        dy = []
+        for key in self.fit_names:
+            if key in self.spot_pars.keys():
+                for j in range(self.nspots):
+                    dy.append(np.sum(2 * (yf - self.y) * dic_full[key][:, j])/np.std(self.y))
+            elif key in self.inst_pars.keys():
+                for j in range(self.mmax):
+                    dy.append(np.sum(2 * (yf - self.y) * dic_full[key][:, j])/np.std(self.y))
+            else:
+                dy.append(np.sum(2 * (yf - self.y) * dic_full[key])/np.std(self.y))
+        return np.array(dy)
+
+    def minimize(self, n=1000):
+        ranges = self.bounds[:, 1] - self.bounds[:, 0]
+        ndim = ranges.size
+        theta = self.bounds[:, 0] + ranges * np.random.rand(n, ndim)
+        opts, sses = [], []
+        for p0 in tqdm(theta):
+            results = minimize(fun=self.chi, x0=p0, method='L-BFGS-B', jac=self.grad_chi, bounds=self.bounds)
+            opts.append(results.x)
+            sses.append(results.fun)
+        sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
+        return opts, sses
+
+    def mcmc(self, theta, nwalkers=60, nsteps=2500, burn=250):
+        ndim = len(theta)
+        ranges = self.bounds[:, 1] - self.bounds[:, 0]
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnprob)
+        p0 = theta + np.random.randn(nwalkers, ndim) * 1e-2 * ranges
+        for _ in tqdm(sampler.sample(p0, iterations=nsteps), total=nsteps):
+            pass
+        samples = sampler.chain[:, burn:, :].reshape(-1, ndim)
+        return samples
+
+    def multinest(self):
+        def prior(cube):
+            x = np.ones_like(cube)
+            for i, b in enumerate(self.bounds):
+                x[i] = cube[i] * (b[1] - b[0]) + b[0]
+            return x
+
+        def logl(cube):
+            return -self.chi(cube)
+
+        ndim = self.bounds.shape[0]
+
+        results = solve(LogLikelihood=logl, Prior=prior, n_dims=ndim)
+        return results
+
+
+class CheetahModeler(object):
     def __init__(self, l1=0.68, l2=0.00, ir=0.22, x=np.arange(0, 50, .1), y=np.ones(500), rmin=0.5, rmax=1.5,
                  inc_min=0, inc_max=90, Peq_min=1, Peq_max=50, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90,
                  lon_min=0, lon_max=360, rad_min=5, rad_max=30, stdv=0.001, n_spots=2, n_iter=20, n_clusters=30,
