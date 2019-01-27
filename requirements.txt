@@ -1,3 +1,4 @@
+pymultinest
 numpy>=1.11
 scipy>=0.19.0
 astropy>=1.3
