@@ -4,7 +4,7 @@ import builtins
 with open("README.md", 'r') as f:
     long_description = f.read()
 
-extension = Extension(name="_macula", sources=["dwelf/macula.f90"])
+extension = Extension(name="_macula", sources=["dwelf/macula.f90"], extra_compile_args=["-O3"])
 builtins.__DWELF_SETUP__ = True
 import dwelf
 version = dwelf.__version__

@@ -227,8 +227,14 @@ class MaculaModeler(object):
         for p0 in tqdm(theta):
             results = minimize(fun=self.chi, x0=p0, method='L-BFGS-B', jac=self.grad_chi, bounds=self.bounds)
             opts.append(results.x)
-            sses.append(results.fun)
-        sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
+            sses.append(self.chi(results.x))
+        mask = np.isfinite(sses)
+        sses = np.array(sses)[mask]
+        opts = np.array(opts)[mask]
+        sorted_ids = np.argsort(sses)
+        sses = sses[sorted_ids]
+        opts = opts[sorted_ids]
+        # sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
         return opts, sses
 
     def mcmc(self, theta, nwalkers=60, nsteps=2500, burn=250):
@@ -241,7 +247,7 @@ class MaculaModeler(object):
         samples = sampler.chain[:, burn:, :].reshape(-1, ndim)
         return samples
 
-    def multinest(self):
+    def multinest(self, sampling_efficiency=.01, const_efficiency_mode=True, n_live_points=4000, **kwargs):
         def prior(cube):
             x = np.ones_like(cube)
             for i, b in enumerate(self.bounds):
@@ -253,7 +259,8 @@ class MaculaModeler(object):
 
         ndim = self.bounds.shape[0]
 
-        results = solve(LogLikelihood=logl, Prior=prior, n_dims=ndim)
+        results = solve(LogLikelihood=logl, Prior=prior, n_dims=ndim, sampling_efficiency=sampling_efficiency,
+                        const_efficiency_mode=const_efficiency_mode, n_live_points=n_live_points, **kwargs)
         return results
 
 

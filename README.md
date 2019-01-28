@@ -1,11 +1,29 @@
 # dwelf
 Stellar parameter determination based on Spot Modeling
-## Quick start
+## Pre-requisites
+Because `dwelf` uses `MultiNest`, make sure you have installed 
+_blas_, _lapack_ and _atlas_:
+
+    $ sudo apt-get install libblas3 liblapack3 libatlas3-base
+
+Then you should get and compile `MultiNest`:
+    
+    $ git clone https://github.com/JohannesBuchner/MultiNest
+    $ cd MultiNest/build
+    $ cmake ..
+    $ make
+
+And make sure your environment has `LD_LIBRARY_PATH` pointing to `MultiNest/lib`
+    
+## Installation
+In order to get the latest version from source:
+
     $ git clone https://github.com/dioph/dwelf.git
     $ cd dwelf
     $ python setup.py install
 
-## Example
+## Example using CheetahModeler
+
 ```python
 from dwelf import *
 from astropy.io import ascii
@@ -13,8 +31,9 @@ from astropy.io import ascii
 filename = PACKAGEDIR + '/data/kappaCeti2003.csv'
 kappa2003 = ascii.read(filename)
 
-model = CheetahModeler(rmin=0.85, rmax=1.05, inc_min=30, inc_max=80, Peq_min=8.0, Peq_max=10.5, lat_min=-10, lat_max=60,
-                       burn=250, n_walkers=60, n_steps=2500, v_min=4.5, v_max=5.5, threshratio=1.1)
+model = CheetahModeler(rmin=0.85, rmax=1.05, inc_min=30, inc_max=80, Peq_min=8.0, Peq_max=10.5, 
+                       lat_min=-10, lat_max=60, burn=250, n_walkers=60, n_steps=2500,
+                       v_min=4.5, v_max=5.5, threshratio=1.1)
 model.x = kappa2003['time']
 model.y = kappa2003['flux']
 params = model.fit()
