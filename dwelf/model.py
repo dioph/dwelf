@@ -180,7 +180,11 @@ class MaculaModeler(object):
         theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
         theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
         yf = macula(self.t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend)
-        sse = np.sum(np.square(yf - self.y)) / np.std(self.y) ** 2
+        eps = []
+        for t1, t2 in zip(self.tstart, self.tend):
+            mask = np.logical_and(t1 <= self.t, self.t <= t2)
+            eps = np.append(eps, np.square(yf[mask] - self.y[mask]) / np.std(self.y[mask]) ** 2)
+        sse = np.sum(eps)
         return sse
 
     def lnprob(self, theta):
