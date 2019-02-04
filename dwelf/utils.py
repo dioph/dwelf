@@ -163,7 +163,7 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
     # PLOT 1D
     for i in range(ndim):
         ax = fig.add_subplot(grid[i, i])
-        H, edges = np.histogram(samples[:, i], bins=nbins, normed=True)
+        H, edges = np.histogram(samples[:, i], bins=nbins, density=True)
         centers = (edges[1:] + edges[:-1]) / 2
         data = ndimage.gaussian_filter1d((centers, H), sigma=1.0)
         data[1] /= data[1].sum()
