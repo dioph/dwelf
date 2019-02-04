@@ -13,13 +13,12 @@ from . import MPLSTYLE
 
 
 class MaculaModeler(object):
-    def __init__(self, t, y, nspots, dy=None, inc=None, Peq=None, k2=None, k4=None, c1=None, c2=None, c3=None, c4=None,
+    def __init__(self, t, y, nspots, inc=None, Peq=None, k2=None, k4=None, c1=None, c2=None, c3=None, c4=None,
                  d1=None, d2=None, d3=None, d4=None, long=None, lat=None, alpha=None, fspot=None, tmax=None,
-                 life=None, ingress=None, egress=None, U=None, B=None, tstart=None, tend=None):
+                 life=None, ingress=None, egress=None, U=None, B=None, tstart=None, tend=None, wsini=None):
         self.t = t
         self.y = y
         self.nspots = nspots
-        self.dy = dy
         self.inc = inc
         self.Peq = Peq
         self.k2 = k2
@@ -44,9 +43,7 @@ class MaculaModeler(object):
         self.B = B
         self.tstart = tstart
         self.tend = tend
-
-        if self.dy is None:
-            self.dy = np.ones_like(y)
+        self.wsini = wsini
 
         if self.inc is None:
             self.inc = np.array([0, np.pi/2])
@@ -95,6 +92,19 @@ class MaculaModeler(object):
             self.U = np.array([[.9, 1.1] for _ in range(self.mmax)])
         if self.B is None:
             self.B = np.array([[.9, 1.1] for _ in range(self.mmax)])
+
+        if self.tstart is None:
+            self.tstart = np.array([self.t[0] - .01])
+        if self.tend is None:
+            self.tend = np.array([self.t[-1] + .01])
+
+        if self.wsini is not None:
+            sini = self.wsini * self.Peq * 86400 / (2 * np.pi)
+            asini = np.arcsin(sini)
+            if asini[0] > self.inc[0]:
+                self.inc[0] = asini[0]
+            if asini[1] < self.inc[1]:
+                self.inc[1] = asini[1]
 
         self.fixed_params = {}
         self.fit_names = []
@@ -258,8 +268,34 @@ class MaculaModeler(object):
     def multinest(self, sampling_efficiency=.01, const_efficiency_mode=True, n_live_points=4000, **kwargs):
         def prior(cube):
             x = np.ones_like(cube)
+            j = 0
+            k = 0
             for i, b in enumerate(self.bounds):
                 x[i] = cube[i] * (b[1] - b[0]) + b[0]
+                if self.fit_names[j] in self.spot_pars.keys():
+                    k += 1
+                    if k == self.nspots:
+                        k = 0
+                        j += 1
+                elif self.fit_names[j] in self.inst_pars.keys():
+                    k += 1
+                    if k == self.mmax:
+                        k = 0
+                        j += 1
+                else:
+                    if self.wsini is not None:
+                        if self.fit_names[j] == 'inc':
+                            asini = x[i]
+                        if self.fit_names[j] == 'Peq':
+                            bound = 2 * np.pi * np.sin(asini) / (self.wsini * 86400)
+                            b0, b1 = b
+                            if bound[0] < b1:
+                                b1 = bound[0]
+                            if bound[1] > b0:
+                                b0 = bound[1]
+                            x[i] = cube[i] * (b0 - b1) + b0
+                    j += 1
+
             return x
 
         def logl(cube):
