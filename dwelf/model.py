@@ -13,11 +13,12 @@ from . import MPLSTYLE
 
 
 class MaculaModeler(object):
-    def __init__(self, t, y, nspots, inc=None, Peq=None, k2=None, k4=None, c1=None, c2=None, c3=None, c4=None,
+    def __init__(self, t, y, dy, nspots, inc=None, Peq=None, k2=None, k4=None, c1=None, c2=None, c3=None, c4=None,
                  d1=None, d2=None, d3=None, d4=None, long=None, lat=None, alpha=None, fspot=None, tmax=None,
                  life=None, ingress=None, egress=None, U=None, B=None, tstart=None, tend=None, wsini=None):
         self.t = t
         self.y = y
+        self.dy = dy
         self.nspots = nspots
         self.inc = inc
         self.Peq = Peq
@@ -190,11 +191,7 @@ class MaculaModeler(object):
         theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
         theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
         yf = macula(self.t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend)
-        eps = []
-        for t1, t2 in zip(self.tstart, self.tend):
-            mask = np.logical_and(t1 <= self.t, self.t <= t2)
-            eps = np.append(eps, np.square(yf[mask] - self.y[mask]) / np.std(self.y[mask]) ** 2)
-        sse = np.sum(eps)
+        sse = np.sum(np.square(yf - self.y) / self.dy ** 2)
         return sse
 
     def lnprob(self, theta):
@@ -300,7 +297,7 @@ class MaculaModeler(object):
 
         def logl(cube):
             n = self.t.size
-            c = - .5 * n * np.log(2 * np.pi) - .5 * n * np.log(np.std(self.y))
+            c = - .5 * n * np.log(2 * np.pi) - .5 * np.log(self.dy).sum()
             return c - .5 * self.chi(cube)
 
         ndim = self.bounds.shape[0]
