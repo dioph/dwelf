@@ -290,7 +290,7 @@ class MaculaModeler(object):
                                 b1 = bound[0]
                             if bound[1] > b0:
                                 b0 = bound[1]
-                            x[i] = cube[i] * (b0 - b1) + b0
+                            x[i] = cube[i] * (b1 - b0) + b0
                     j += 1
 
             return x
