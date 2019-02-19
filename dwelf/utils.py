@@ -297,3 +297,123 @@ def macula(t, theta_star, theta_spot, theta_inst, derivatives=False, temporal=Fa
         return res
     else:
         return res[0]
+
+
+def triangulate(poly):
+    triangles = []
+    for i in range(poly.shape[0]-2):
+        triangles.append(np.array([poly[i], poly[i+1], poly[-1]]))
+    return np.array(triangles)
+
+
+def triangle_area(triang):
+    A, B, C = triang
+    area = np.abs(A[0]*(B[1]-C[1]) + B[0]*(C[1]-A[1]) + C[0]*(A[1]-B[1]))/2
+    return area
+
+
+def change_coord(q1, q2, triang):
+    A, B, C = triang
+    v = (1 - np.sqrt(q1)) * A + np.sqrt(q1) * (1 - q2) * B + q2 * np.sqrt(q1) * C
+    return v
+
+
+def quadratic_limb(q1, q2):
+    u1 = 2 * np.sqrt(q1) * q2
+    u2 = np.sqrt(q1) * (1 - 2 * q2)
+    return u1, u2
+
+
+def cubic_limb(q1, q2, q3):
+    c2 = (q1 ** (1 / 3) / 12) * (28 * (9 - 5 * np.sqrt(2)) + 3 * np.sqrt(q2) *
+                                 (-6 * np.cos(2 * np.pi * q3) + (3 + 10 * np.sqrt(2) * np.sin(2 * np.pi * q3))))
+    c3 = (q1 ** (1 / 3) / 9) * (-632 + 396 * np.sqrt(q2)
+                                + 3 * np.sqrt(q2) * (4 - 21 * np.sqrt(2)) * np.sin(2 * np.pi * q3))
+    c4 = (q1 ** (1 / 3) / 12) * (28 * (9 - 5 * np.sqrt(2)) + 3 * np.sqrt(q2) *
+                                 (6 * np.cos(2 * np.pi * q3) + (3 + 10 * np.sqrt(2) * np.sin(2 * np.pi * q3))))
+    return c2, c3, c4
+
+
+def polygon_intersection(poly1, poly2):
+    poly = []
+    for p in poly1:
+        if is_inside(p, poly2):
+            add_point(poly, p)
+    for p in poly2:
+        if is_inside(p, poly1):
+            add_point(poly, p)
+    for i in range(poly1.shape[0]):
+        if i == poly1.shape[0] - 1:
+            nxt = 0
+        else:
+            nxt = i + 1
+        points = get_intersection_points(poly1[i], poly1[nxt], poly2)
+        for p in points:
+            add_point(poly, p)
+    return sort_clockwise(np.array(poly))
+
+
+def get_intersection_point(l1p1, l1p2, l2p1, l2p2):
+    a1 = l1p2[1] - l1p1[1]
+    b1 = l1p1[0] - l1p2[0]
+    c1 = a1 * l1p1[0] + b1 * l1p1[1]
+    a2 = l2p2[1] - l2p1[1]
+    b2 = l2p1[0] - l2p2[0]
+    c2 = a2 * l2p1[0] + b2 * l2p1[1]
+    det = a1 * b2 - a2 * b1
+    if np.abs(det) < 1e-9:
+        return np.nan
+    x = (b2 * c1 - b1 * c2) / det
+    y = (a1 * c2 - a2 * c1) / det
+    online1 = ((min(l1p1[0], l1p2[0]) < x) or (np.abs(min(l1p1[0], l1p2[0]) - x) < 1e-9)) \
+        and ((max(l1p1[0], l1p2[0]) > x) or (np.abs(max(l1p1[0], l1p2[0]) - x) < 1e-9)) \
+        and ((min(l1p1[1], l1p2[1]) < y) or (np.abs(min(l1p1[1], l1p2[1]) - y) < 1e-9)) \
+        and ((max(l1p1[1], l1p2[1]) > y) or (np.abs(max(l1p1[1], l1p2[1]) - y) < 1e-9))
+    online2 = ((min(l2p1[0], l2p2[0]) < x) or (np.abs(min(l2p1[0], l2p2[0]) - x) < 1e-9)) \
+        and ((max(l2p1[0], l2p2[0]) > x) or (np.abs(max(l2p1[0], l2p2[0]) - x) < 1e-9)) \
+        and ((min(l2p1[1], l2p2[1]) < y) or (np.abs(min(l2p1[1], l2p2[1]) - y) < 1e-9)) \
+        and ((max(l2p1[1], l2p2[1]) > y) or (np.abs(max(l2p1[1], l2p2[1]) - y) < 1e-9))
+    if online1 and online2:
+        return np.array([x, y])
+
+    return np.nan
+
+
+def get_intersection_points(p1, p2, poly):
+    intersection = []
+    for i in range(poly.shape[0]):
+        if i == poly.shape[0] - 1:
+            nxt = 0
+        else:
+            nxt = i + 1
+        ip = get_intersection_point(p1, p2, poly[i], poly[nxt])
+        if np.all(np.isfinite(ip)):
+            add_point(intersection, ip)
+    return np.array(intersection)
+
+
+def add_point(l, p):
+    for q in l:
+        if np.abs(q[0] - p[0]) < 1e-9 and np.abs(q[1] - p[1]) < 1e-9:
+            break
+    else:
+        l.append(p)
+
+
+def is_inside(p, poly):
+    i = 0
+    j = poly.shape[0] - 1
+    res = False
+    for i in range(poly.shape[0]):
+        if (poly[i, 1] > p[1]) != (poly[j, 1] > p[1]) \
+          and p[0] < (poly[j, 0] - poly[i, 0]) * (p[1] - poly[i, 1]) / (poly[j, 1] - poly[i, 1]) + poly[i, 0]:
+            res = not res
+        j = i
+        i = i + 1
+    return res
+
+
+def sort_clockwise(points):
+    center = np.mean(points, axis=0)
+    new_points = sorted(points, key=lambda p: -np.arctan2(p[1] - center[1], p[0] - center[0]))
+    return np.array(new_points)
