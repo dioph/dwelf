@@ -6,15 +6,15 @@ import matplotlib.patches as mpatches
 from scipy.cluster.vq import whiten, kmeans2
 from scipy.optimize import leastsq, minimize
 from tqdm.auto import tqdm
-from pymultinest.solve import  solve
+from pymultinest.solve import solve
 
 from .utils import *
 from . import MPLSTYLE
 
 
 class MaculaModeler(object):
-    def __init__(self, t, y, dy, nspots, inc=None, Peq=None, k2=None, k4=None, c1=None, c2=None, c3=None, c4=None,
-                 d1=None, d2=None, d3=None, d4=None, long=None, lat=None, alpha=None, fspot=None, tmax=None,
+    def __init__(self, t, y, nspots, dy=None, inc=None, Peq=None, k2=None, k4=None, c=None, d=None,
+                 limb_law='default', same_limb=False, lon=None, lat=None, alpha=None, fspot=None, tmax=None,
                  life=None, ingress=None, egress=None, U=None, B=None, tstart=None, tend=None, wsini=None):
         self.t = t
         self.y = y
@@ -24,15 +24,16 @@ class MaculaModeler(object):
         self.Peq = Peq
         self.k2 = k2
         self.k4 = k4
-        self.c1 = c1
-        self.c2 = c2
-        self.c3 = c3
-        self.c4 = c4
-        self.d1 = d1
-        self.d2 = d2
-        self.d3 = d3
-        self.d4 = d4
-        self.long = long
+        self.c = c
+        self.d = d
+
+        self.limb_law = limb_law
+        self.same_limb = same_limb
+
+        limb_size = {'linear': 1, 'quadratic': 2, 'cubic': 3, 'default': 4}
+        assert limb_law in limb_size.keys(), "Unknown limb-darkening law {}".format(limb_law)
+
+        self.lon = lon
         self.lat = lat
         self.alpha = alpha
         self.fspot = fspot
@@ -46,6 +47,10 @@ class MaculaModeler(object):
         self.tend = tend
         self.wsini = wsini
 
+        if self.dy is None:
+            self.dy = np.ones_like(self.y)
+
+        # validate star params
         if self.inc is None:
             self.inc = np.array([0, np.pi/2])
         if self.Peq is None:
@@ -54,25 +59,41 @@ class MaculaModeler(object):
             self.k2 = np.array([-1, 1])
         if self.k4 is None:
             self.k4 = np.array([-1, 1])
-        if self.c1 is None:
-            self.c1 = np.array([-1, 1])
-        if self.c2 is None:
-            self.c2 = np.array([-1, 1])
-        if self.c3 is None:
-            self.c3 = np.array([-1, 1])
-        if self.c4 is None:
-            self.c4 = np.array([-1, 1])
-        if self.d1 is None:
-            self.d1 = np.array([-1, 1])
-        if self.d2 is None:
-            self.d2 = np.array([-1, 1])
-        if self.d3 is None:
-            self.d3 = np.array([-1, 1])
-        if self.d4 is None:
-            self.d4 = np.array([-1, 1])
 
-        if self.long is None:
-            self.long = np.array([[-np.pi, np.pi] for _ in range(nspots)])
+        if self.c is None:
+            self.c = np.array([[-1, 1] for _ in range(limb_size[limb_law])])
+        if self.d is None:
+            self.d = np.array([[-1, 1] for _ in range(limb_size[limb_law])])
+        if limb_law is 'linear':
+            self.c1 = 0.
+            self.c3 = 0.
+            self.c4 = 0.
+            self.c2, = self.c
+            self.d1 = 0.
+            self.d3 = 0.
+            self.d4 = 0.
+            self.d2, = self.d
+        elif limb_law is 'quadratic':
+            self.c1 = 0.
+            self.c3 = 0.
+            self.c2, self.c4 = self.c
+            self.d1 = 0.
+            self.d3 = 0.
+            self.d2, self.d4 = self.d
+        elif limb_law is 'cubic':
+            self.c1 = 0.
+            self.c2, self.c3, self.c4 = self.c
+            self.d1 = 0.
+            self.d2, self.d3, self.d4 = self.d
+        else:
+            self.c1, self.c2, self.c3, self.c4 = self.c
+            self.d1, self.d2, self.d3, self.d4 = self.d
+        if self.same_limb:
+            self.d1, self.d2, self.d3, self.d4 = 0., 0., 0., 0.
+
+        # validate spot params
+        if self.lon is None:
+            self.lon = np.array([[-np.pi, np.pi] for _ in range(nspots)])
         if self.lat is None:
             self.lat = np.array([[-np.pi/2, np.pi/2] for _ in range(nspots)])
         if self.alpha is None:
@@ -88,6 +109,7 @@ class MaculaModeler(object):
         if self.egress is None:
             self.egress = np.array([[0, t[-1]-t[0]] for _ in range(nspots)])
 
+        # validate inst params
         self.mmax = np.size(self.tstart)
         if self.U is None:
             self.U = np.array([[.9, 1.1] for _ in range(self.mmax)])
@@ -99,14 +121,22 @@ class MaculaModeler(object):
         if self.tend is None:
             self.tend = np.array([self.t[-1] + .01])
 
-        if self.wsini is not None:
-            sini = self.wsini * self.Peq * 86400 / (2 * np.pi)
-            asini = np.arcsin(sini)
-            if asini[0] > self.inc[0]:
-                self.inc[0] = asini[0]
-            if asini[1] < self.inc[1]:
-                self.inc[1] = asini[1]
+        # sampling sini/Peq polygon
+        if self.wsini is None:
+            self.wsini = np.array([1e-90, np.inf])
 
+        amin, amax = self.wsini
+        k = 2 * np.pi / 86400
+        poly1 = np.array([[0, 0], [1, k/amin], [1, k/amax]])
+        poly2 = np.array(list(product(np.atleast_1d(np.sin(self.inc)), np.atleast_1d(self.Peq))))
+        poly1 = sort_clockwise(poly1)
+        poly2 = sort_clockwise(poly2)
+        poly = polygon_intersection(poly1, poly2)
+        self.triangles = triangulate(poly)
+        area = np.sum([triangle_area(t) for t in self.triangles])
+        self.relative_area = np.array([triangle_area(t)/area for t in self.triangles])
+
+        # list of fitted variable names and dictionary of fixed parameter values
         self.fixed_params = {}
         self.fit_names = []
         for key, val in self.parameters.items():
@@ -120,6 +150,8 @@ class MaculaModeler(object):
                     self.fixed_params[key] = val
                 else:
                     self.fit_names.append(key)
+
+        # bounds for ndim variables
         self.bounds = []
         for key in self.fit_names:
             bounds = getattr(self, key)
@@ -140,7 +172,7 @@ class MaculaModeler(object):
 
     @property
     def spot_pars(self):
-        return dict(long=self.long, lat=self.lat, alpha=self.alpha, fspot=self.fspot,
+        return dict(lon=self.lon, lat=self.lat, alpha=self.alpha, fspot=self.fspot,
                     tmax=self.tmax, life=self.life, ingress=self.ingress, egress=self.egress)
 
     @property
@@ -150,6 +182,12 @@ class MaculaModeler(object):
     def predict(self, t, theta):
         fit_params = self.get_fit_params(theta)
         theta_full = {**fit_params, **self.fixed_params}
+        if self.same_limb:
+            theta_full['d1'] = theta_full['c1']
+            theta_full['d2'] = theta_full['c2']
+            theta_full['d3'] = theta_full['c3']
+            theta_full['d4'] = theta_full['c4']
+
         theta_star = np.array([theta_full[key] for key in self.star_pars.keys()])
         theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
         theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
@@ -191,7 +229,7 @@ class MaculaModeler(object):
         theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
         theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
         yf = macula(self.t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend)
-        sse = np.sum(np.square(yf - self.y) / self.dy ** 2)
+        sse = np.sum(np.square((yf - self.y) / self.dy))
         return sse
 
     def lnprob(self, theta):
@@ -249,7 +287,6 @@ class MaculaModeler(object):
         sorted_ids = np.argsort(sses)
         sses = sses[sorted_ids]
         opts = opts[sorted_ids]
-        # sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
         return opts, sses
 
     def mcmc(self, theta, nwalkers=60, nsteps=2500, burn=250):
@@ -264,34 +301,75 @@ class MaculaModeler(object):
 
     def multinest(self, sampling_efficiency=.01, const_efficiency_mode=True, n_live_points=4000, **kwargs):
         def prior(cube):
-            x = np.ones_like(cube)
-            j = 0
-            k = 0
-            for i, b in enumerate(self.bounds):
-                x[i] = cube[i] * (b[1] - b[0]) + b[0]
-                if self.fit_names[j] in self.spot_pars.keys():
-                    k += 1
-                    if k == self.nspots:
-                        k = 0
-                        j += 1
-                elif self.fit_names[j] in self.inst_pars.keys():
-                    k += 1
-                    if k == self.mmax:
-                        k = 0
-                        j += 1
+            fit_params = self.get_fit_params(cube)
+            done = []
+
+            # inclination x period parameter space
+            if 'inc' in self.fit_names:
+                if 'Peq' in self.fit_names:
+                    q1 = fit_params['inc']
+                    q2 = fit_params['Peq']
+
+                    area_limits = np.cumsum(self.relative_area)
+                    area_limits = np.append(0, area_limits)
+                    group = np.searchsorted(area_limits, q2) - 1
+                    triang = self.triangles[group]
+                    q2 = (q2 - area_limits[group]) / self.relative_area[group]
+                    v = change_coord(q1, q2, triang)
+
+                    fit_params['inc'] = np.arcsin(v[0])
+                    fit_params['Peq'] = v[1]
+                    done.append('inc')
+                    done.append('Peq')
                 else:
-                    if self.wsini is not None:
-                        if self.fit_names[j] == 'inc':
-                            asini = x[i]
-                        if self.fit_names[j] == 'Peq':
-                            bound = 2 * np.pi * np.sin(asini) / (self.wsini * 86400)
-                            b0, b1 = b
-                            if bound[0] < b1:
-                                b1 = bound[0]
-                            if bound[1] > b0:
-                                b0 = bound[1]
-                            x[i] = cube[i] * (b1 - b0) + b0
-                    j += 1
+                    sini = (np.sin(self.inc[1]) - np.sin(self.inc[0])) * fit_params['inc'] + np.sin(self.inc[0])
+                    fit_params['inc'] = np.arcsin(sini)
+                    done.append('inc')
+
+            # limb-darkening parameter space
+            if self.limb_law is 'quadratic':
+                fit_params['c2'], fit_params['c4'] = quadratic_limb(fit_params['c2'], fit_params['c4'])
+                if 'd2' in self.fit_names:
+                    fit_params['d2'], fit_params['d4'] = quadratic_limb(fit_params['d2'], fit_params['d4'])
+                    done.append('d2')
+                    done.append('d4')
+                done.append('c2')
+                done.append('c4')
+            elif self.limb_law is 'cubic':
+                fit_params['c2'], fit_params['c3'], fit_params['c4'] = cubic_limb(fit_params['c2'],
+                                                                                  fit_params['c3'],
+                                                                                  fit_params['c4'])
+                if 'd2' in self.fit_names:
+                    fit_params['d2'], fit_params['d3'], fit_params['d4'] = cubic_limb(fit_params['d2'],
+                                                                                      fit_params['d3'],
+                                                                                      fit_params['d4'])
+                    done.append('d2')
+                    done.append('d3')
+                    done.append('d4')
+                done.append('c2')
+                done.append('c3')
+                done.append('c4')
+
+            # standard uniform parameter distributions
+            i = 0
+            for key in self.fit_names:
+                bound = getattr(self, key)
+                if key in self.star_pars.keys():
+                    add = 1
+                elif key in self.spot_pars.keys():
+                    add = self.nspots
+                else:
+                    add = self.mmax
+                if key not in done:
+                    fit_params[key] = cube[i:i + add] * (bound.T[1] - bound.T[0]) + bound.T[0]
+                i += add
+
+            # convert from dictionary to array
+            x = []
+            for key, val in fit_params.items():
+                val = np.atleast_1d(val)
+                for v in val:
+                    x.append(v)
 
             return x
 
@@ -676,17 +754,17 @@ class CheetahModeler(object):
         self.n_temps = n
         if n == 1:
             # initialize walkers in a ball around best fit
-            p0s = [result[0] + .1 * np.random.randn(self.n_dim) for i in range(self.n_walkers)]
+            p0s = [result[0] + .1 * np.random.randn(self.n_dim) for _ in range(self.n_walkers)]
             self.sampler = self.mcmc(p0s)
             self.chain = self.sampler.chain
         else:
             # initialize walkers in n balls around best fits
-            p0s = [[result[j] + .1 * np.random.randn(self.n_dim) for i in range(self.n_walkers)] for j in range(n)]
+            p0s = [[result[j] + .1 * np.random.randn(self.n_dim) for _ in range(self.n_walkers)] for j in range(n)]
             self.sampler = self.ptmcmc(p0s)
             self.chain = self.sampler.chain[0]
         # cut burn-in period
         self.samples = self.chain[:, self.burn:, :].reshape((-1, self.n_dim))
-        # 16th and 84th percentiles give the marginalized distributions  
+        # 16th and 84th percentiles give the marginalized distributions
         p = map(lambda v: (v[1], v[2] - v[1], v[1] - v[0]), zip(*np.percentile(self.samples, [16, 50, 84], axis=0)))
         return list(p)
 
