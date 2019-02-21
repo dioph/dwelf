@@ -16,6 +16,37 @@ class MaculaModeler(object):
     def __init__(self, t, y, nspots, dy=None, inc=None, Peq=None, k2=None, k4=None, c=None, d=None,
                  limb_law='default', same_limb=False, lon=None, lat=None, alpha=None, fspot=None, tmax=None,
                  life=None, ingress=None, egress=None, U=None, B=None, tstart=None, tend=None, wsini=None):
+        """Class constructor
+
+        Attributes
+        ----------
+        t: time array
+        y: flux array
+        nspots: number of spots
+        dy: flux uncertainties
+        inc: stellar inclination
+        Peq: rotation period at equator
+        k2: quadratic differential rotation coefficient
+        k4: quartic differential rotation coefficient
+        c: stellar limb-darkening coefficients
+        d: spot limb-darkening coefficients
+        limb_law: one of:
+            'linear' (1-parameter), 'quadratic' (2-parameter), 'cubic' (3-parameter) or 'default' (full 4-parameter)
+        same_limb: whether to always assume c==d in the model
+        lon: spot longitudes (rad)
+        lat: spot latitudes (rad)
+        alpha: spot radius (rad)
+        fspot: spot-to-photosphere intensity ratio
+        tmax: time of greatest spot area
+        life: spot lifetimes
+        ingress: spot ingress times
+        egress: spot egress times
+        U: unspotted surface flux value
+        B: instrumental blending factor
+        tstart: start time for each of the stitched curves
+        tend: end time for each of the stitched curves
+        wsini: bounds on vsini/radius (rad/s)
+        """
         self.t = t
         self.y = y
         self.dy = dy
@@ -180,6 +211,17 @@ class MaculaModeler(object):
         return dict(U=self.U, B=self.B)
 
     def predict(self, t, theta):
+        """Calculates the model flux for given parameter values
+
+        Parameters
+        ----------
+        t: time array
+        theta: parameter vector
+
+        Returns
+        -------
+        yf: model flux
+        """
         fit_params = self.get_fit_params(theta)
         theta_full = {**fit_params, **self.fixed_params}
         if self.same_limb:
@@ -195,6 +237,16 @@ class MaculaModeler(object):
         return yf
 
     def get_fit_params(self, theta):
+        """Creates a dictionary with the fitted parameter names and values
+
+        Parameters
+        ----------
+        theta: parameter vector
+
+        Returns
+        -------
+        fit_params: parameter dictionary with names and values
+        """
         fit_params = {}
         i = 0
         for key in self.fit_names:
@@ -210,6 +262,16 @@ class MaculaModeler(object):
         return fit_params
 
     def lnprior(self, theta):
+        """Simple uniform log prior
+
+        Parameters
+        ----------
+        theta: parameter vector
+
+        Returns
+        -------
+        lp: NINF if outside bounds, 0 otherwise
+        """
         fit_params = self.get_fit_params(theta)
         for key, val in fit_params.items():
             bounds = getattr(self, key)
@@ -223,6 +285,16 @@ class MaculaModeler(object):
         return 0.
 
     def chi(self, theta):
+        """Chi squared of parameters given a set of observations
+
+        Parameters
+        ----------
+        theta: parameter vector
+
+        Returns
+        -------
+        sse: sum of squared errors weighted by observation uncertainties
+        """
         fit_params = self.get_fit_params(theta)
         theta_full = {**fit_params, **self.fixed_params}
         theta_star = np.array([theta_full[key] for key in self.star_pars.keys()])
@@ -233,17 +305,40 @@ class MaculaModeler(object):
         return sse
 
     def lnprob(self, theta):
+        """Log posterior probability function to be maximized
+
+        Parameters
+        ----------
+        theta: parameter vector
+
+        Returns
+        -------
+        log likelihood when parameters are within prior bounds (NINF otherwise)
+        """
         lp = self.lnprior(theta)
         if not np.isfinite(lp):
             return -np.inf
-        return lp - self.chi(theta)
+        n = self.t.size
+        c = - .5 * n * np.log(2 * np.pi) - .5 * np.log(self.dy).sum()
+        return c - .5 * self.chi(theta)
 
     def grad_chi(self, theta):
+        """Gradient of log likelihood
+
+        Parameters
+        ----------
+        theta: parameter vector
+
+        Returns
+        -------
+        dy: partial derivatives of log likelihood with respect to each parameter
+        """
         fit_params = self.get_fit_params(theta)
         theta_full = {**fit_params, **self.fixed_params}
         theta_star = np.array([theta_full[key] for key in self.star_pars.keys()])
         theta_spot = np.array([theta_full[key] for key in self.spot_pars.keys()])
         theta_inst = np.array([theta_full[key] for key in self.inst_pars.keys()])
+
         result = macula(self.t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend,
                         full_output=True, derivatives=True)
         yf = result[0]
@@ -273,6 +368,17 @@ class MaculaModeler(object):
         return np.array(dy)
 
     def minimize(self, n=1000):
+        """Searches for local minima from a set of random initial points
+
+        Parameters
+        ----------
+        n: number of initial points
+
+        Returns
+        -------
+        opts: best fit starting at each point sorted by chi^2
+        sses: corresponding chi^2 value for each best fit
+        """
         ranges = self.bounds[:, 1] - self.bounds[:, 0]
         ndim = ranges.size
         theta = self.bounds[:, 0] + ranges * np.random.rand(n, ndim)
@@ -290,6 +396,19 @@ class MaculaModeler(object):
         return opts, sses
 
     def mcmc(self, theta, nwalkers=60, nsteps=2500, burn=250):
+        """Runs Markov Chain Monte Carlo to sample the posterior distribution
+
+        Parameters
+        ----------
+        theta: starting value of parameter vector
+        nwalkers: number of walkers/chains
+        nsteps: number of steps in each chain
+        burn: number of burn-in steps
+
+        Returns
+        -------
+        samples: samples from the posterior distribution
+        """
         ndim = len(theta)
         ranges = self.bounds[:, 1] - self.bounds[:, 0]
         sampler = emcee.EnsembleSampler(nwalkers, ndim, self.lnprob)
@@ -300,6 +419,23 @@ class MaculaModeler(object):
         return samples
 
     def multinest(self, sampling_efficiency=.01, const_efficiency_mode=True, n_live_points=4000, **kwargs):
+        """Runs MultiNest to sample the posterior distribution
+
+        Parameters
+        ----------
+        sampling_efficiency: defines the sampling efficiency (default=0.01)
+        const_efficiency_mode: whether to run in constant efficiency mode (default=True)
+        n_live_points: number of live points (default=4000)
+        **kwargs:
+            importance_nested_sampling: whether to activate INS (default=True)
+            evidence_tolerance: evidence tolerance factor (default=0.5)
+            outputfiles_basename: root for MultiNest output files (default="chains/1-")
+            verbose: updates on sampling progress (default=False)
+
+        Returns
+        -------
+        results: data returned by pymultinest.solve.solve
+        """
         def prior(cube):
             fit_params = self.get_fit_params(cube)
             done = []
