@@ -228,6 +228,7 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
             else:
                 ax.tick_params(rotation=45)
     fig.legend(handles=handles)
+    return fig
 
 
 def macula(t, theta_star, theta_spot, theta_inst, derivatives=False, temporal=False, tdeltav=False,
