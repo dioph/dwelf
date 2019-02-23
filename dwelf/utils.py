@@ -136,7 +136,7 @@ def eker(t, theta, l1=.68, l2=0., ir=.22):
     return y
 
 
-def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
+def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbins=30):
     """Plots a Giant Triangle Confusogram
 
     Parameters
@@ -147,7 +147,10 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
         List of names for each variable (size ndim)
     priors: list of callables, optional
         List of prior functions for the variables distributions (size ndim)
-    ptrue: float, optional     #TODO: change into generic list of floats
+    ptrue: list of floats, optional
+        List of true estimates for each parameter
+    precision: list of ints, optional
+        List of decimal places to write down for each parameter. Defaults to 2
     nbins: int, optional
         Number of bins to be used in 1D and 2D histograms. Defaults to 30
     """
@@ -159,6 +162,11 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
     # TODO: pyplot style context
     grid = plt.GridSpec(ndim, ndim, wspace=0.0, hspace=0.0)
     handles = []
+
+    if precision is None:
+        precision = 2 * np.ones(ndim, dtype=int)
+    if ptrue is None:
+        ptrue = np.array([None for _ in range(ndim)])
 
     # PLOT 1D
     for i in range(ndim):
@@ -175,16 +183,17 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
         l3 = ax.axvline(p[i][0], color='k', ls='--', label='median')
         mask = np.logical_and(centers - p[i][0] <= p[i][2], p[i][0] - centers <= p[i][1])
         ax.fill_between(centers[mask], np.zeros(mask.sum()), data[1][mask], color='b', alpha=0.3)
+        if ptrue[i] is not None:
+            l4 = ax.axvline(ptrue[i], color='gray', lw=1.5, label='true')
         if i < ndim - 1:
             ax.set_xticks([])
         else:
             ax.tick_params(rotation=45)
-            if ptrue is not None:
-                l4 = ax.axvline(ptrue, color='gray', lw=1.5, label='true')
         ax.set_yticks([])
         ax.set_ylim(0)
         if labels is not None:
-            ax.set_title('{0} = {1:.2f}$^{{+{2:.2f}}}_{{-{3:.2f}}}$'.format(labels[i], p[i][0], p[i][2], p[i][1]))
+            ax.set_title('{0} = {1:.{4}f}$^{{+{2:.{4}f}}}_{{-{3:.{4}f}}}$'.format(labels[i], p[i][0], p[i][2], p[i][1],
+                                                                                  precision[i]))
 
     handles.append(l1)
     try:
@@ -217,12 +226,14 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, nbins=30):
             ybins = (yi[1:] + yi[:-1]) / 2
             ax.contourf(xbins, ybins, data, levels=chainlevels, colors=['#1f77b4', '#52aae7', '#85ddff'], alpha=0.3)
             ax.contour(data, chainlevels, extent=extents, colors='b')
+            if ptrue[i] is not None:
+                ax.axhline(ptrue[i], color='gray', lw=1.5)
+            if ptrue[j] is not None:
+                ax.axvline(ptrue[j], color='gray', lw=1.5)
             if i < ndim - 1:
                 ax.set_xticks([])
             else:
                 ax.tick_params(rotation=45)
-                if ptrue is not None:
-                    ax.axhline(ptrue, color='gray', lw=1.5)
             if j > 0:
                 ax.set_yticks([])
             else:
