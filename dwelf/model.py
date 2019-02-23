@@ -522,11 +522,10 @@ class MaculaModeler(object):
 
 
 class CheetahModeler(object):
-    def __init__(self, l1=0.68, l2=0.00, ir=0.22, x=np.arange(0, 50, .1), y=np.ones(500), rmin=0.5, rmax=1.5,
-                 inc_min=0, inc_max=90, Peq_min=1, Peq_max=50, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90,
-                 lon_min=0, lon_max=360, rad_min=5, rad_max=30, stdv=0.001, n_spots=2, n_iter=20, n_clusters=30,
-                 burn=100, n_walkers=120, n_steps=1000, v_min=0, v_max=10, threshratio=2, n_temps=1, thin=1,
-                 n_spaced=3, savefile=None):
+    def __init__(self, x, y, dy=None, l1=0.68, l2=0.00, ir=0.22, rmin=0.5, rmax=1.5, inc_min=0, inc_max=90,
+                 Peq_min=1, Peq_max=50, k_min=-0.6, k_max=0.6, lat_min=-90, lat_max=90, lon_min=0, lon_max=360,
+                 rad_min=5, rad_max=30, n_spots=2, n_iter=20, n_clusters=30, burn=100, n_walkers=120, n_steps=1000,
+                 v_min=0, v_max=10, threshratio=2, n_temps=1, thin=1, n_spaced=3, savefile=None):
         """Class constructor
 
         Attributes
@@ -543,7 +542,6 @@ class CheetahModeler(object):
         lat_min, lat_max: spot latitude bounds (deg)
         lon_min, lon_max: spot longitude bounds (deg)
         rad_min, rad_max: spot radius bounds (deg)
-        stdv: stellar activity (# TODO: deprecate)
         n_spots: number of spots
         n_iter: number of initial iterations of the L-M algorithm during the fitting process
         n_clusters: number of clusters found by kmeans to simplify fitting process
@@ -562,6 +560,7 @@ class CheetahModeler(object):
         self.ir = ir
         self.x = x
         self.y = y
+        self.dy = dy
         self.rmin = rmin
         self.rmax = rmax
         self.inc_min = inc_min
@@ -576,7 +575,6 @@ class CheetahModeler(object):
         self.lon_max = lon_max
         self.rad_min = rad_min
         self.rad_max = rad_max
-        self.stdv = stdv
         self.n_spots = n_spots
         self.n_iter = n_iter
         self.n_clusters = n_clusters
@@ -591,6 +589,13 @@ class CheetahModeler(object):
         self.n_temps = n_temps
         self.n_spaced = n_spaced
         self.savefile = savefile
+
+        if self.dy is None:
+            self.dy = np.ones_like(self.y)
+
+        self.yf = []
+        self.bestps = np.array([])
+        self.samples = np.array([])
 
     def solve(self, theta):
         """Models any number of spots
@@ -686,7 +691,7 @@ class CheetahModeler(object):
             star_params = []
         theta = np.append(star_params, theta)
         error = self.y - self.solve(theta)
-        return np.sum(np.square(error)) / self.stdv
+        return np.sum(np.square(error / self.dy))
 
     def lnprob(self, theta):
         """log of posterior probability of theta (prior * likelihood)
@@ -694,7 +699,9 @@ class CheetahModeler(object):
         lp = self.lnprior(theta)
         if not np.isfinite(lp):
             return -np.inf
-        return lp - self.chi(theta)
+        n = self.x.size
+        c = - .5 * n * np.log(2 * np.pi) - .5 * np.log(self.dy).sum()
+        return c - .5 * self.chi(theta)
 
     def eps(self, theta, star_params=None):
         """Returns array of residuals between light curve and fit (unless lnprior == -inf)
@@ -705,7 +712,7 @@ class CheetahModeler(object):
         lp = self.lnprior(theta)
         if not np.isfinite(lp):
             return np.ones_like(self.y)
-        return self.y - self.solve(theta)
+        return (self.y - self.solve(theta)) / self.dy
 
     def llsq(self, p0s, n_iter=0, star_params=None):
         """Runs Levenberg-Marquardt algorithm for each initial point p0
@@ -846,11 +853,11 @@ class CheetahModeler(object):
         """Runs Monte Carlo Markov Chain algorithm to determine uncertainties
         """
         sampler = emcee.EnsembleSampler(self.n_walkers, self.n_dim, self.lnprob)
-        if self.savefile:
+        if self.savefile is not None:
             f = open(self.savefile, "w")
             f.close()
         for result in tqdm(sampler.sample(p0s, iterations=self.n_steps, thin=self.thin), total=self.n_steps):
-            if self.savefile:
+            if self.savefile is not None:
                 position = result[0]
                 f = open(self.savefile, "a")
                 for k in range(position.shape[0]):
@@ -866,11 +873,11 @@ class CheetahModeler(object):
             return -self.chi(theta)
 
         sampler = emcee.PTSampler(self.n_temps, self.n_walkers, self.n_dim, logl, self.lnprior)
-        if self.savefile:
+        if self.savefile is not None:
             f = open(self.savefile, "w")
             f.close()
         for result in tqdm(sampler.sample(p0s, iterations=self.n_steps, thin=self.thin), total=self.n_steps):
-            if self.savefile:
+            if self.savefile is not None:
                 position = result[0]
                 f = open(self.savefile, "a")
                 for k in range(position.shape[0]):
@@ -891,15 +898,15 @@ class CheetahModeler(object):
         if n == 1:
             # initialize walkers in a ball around best fit
             p0s = [result[0] + .1 * np.random.randn(self.n_dim) for _ in range(self.n_walkers)]
-            self.sampler = self.mcmc(p0s)
-            self.chain = self.sampler.chain
+            sampler = self.mcmc(p0s)
+            chain = sampler.chain
         else:
             # initialize walkers in n balls around best fits
             p0s = [[result[j] + .1 * np.random.randn(self.n_dim) for _ in range(self.n_walkers)] for j in range(n)]
-            self.sampler = self.ptmcmc(p0s)
-            self.chain = self.sampler.chain[0]
+            sampler = self.ptmcmc(p0s)
+            chain = sampler.chain[0]
         # cut burn-in period
-        self.samples = self.chain[:, self.burn:, :].reshape((-1, self.n_dim))
+        self.samples = chain[:, self.burn:, :].reshape((-1, self.n_dim))
         # 16th and 84th percentiles give the marginalized distributions
         p = map(lambda v: (v[1], v[2] - v[1], v[1] - v[0]), zip(*np.percentile(self.samples, [16, 50, 84], axis=0)))
         return list(p)
