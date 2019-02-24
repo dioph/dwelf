@@ -764,7 +764,7 @@ class CheetahModeler(object):
         sorted_ids = np.argsort(sses)
         opts = opts[sorted_ids]
         # let all parameters have same variance (enable clustering)
-        optsmat = whiten(np.array(opts))
+        optsmat = whiten(opts)
         # find (n_clusters) centroids using kmeans
         __, label = kmeans2(optsmat, self.n_clusters, iter=20, minit='points')
         label = list(label)
