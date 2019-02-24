@@ -558,9 +558,9 @@ class CheetahModeler(object):
         self.l1 = l1
         self.l2 = l2
         self.ir = ir
-        self.x = x
-        self.y = y
-        self.dy = dy
+        self.x = np.asarray(x)
+        self.y = np.asarray(y)
+        self.dy = np.asarray(dy)
         self.rmin = rmin
         self.rmax = rmax
         self.inc_min = inc_min
@@ -578,7 +578,6 @@ class CheetahModeler(object):
         self.n_spots = n_spots
         self.n_iter = n_iter
         self.n_clusters = n_clusters
-        self.n_dim = 3 + 3 * n_spots
         self.burn = burn
         self.n_walkers = n_walkers
         self.n_steps = n_steps
@@ -593,6 +592,7 @@ class CheetahModeler(object):
         if self.dy is None:
             self.dy = np.ones_like(self.y)
 
+        self.n_dim = 3 + 3 * n_spots
         self.yf = []
         self.bestps = np.array([])
         self.samples = np.array([])
@@ -624,16 +624,17 @@ class CheetahModeler(object):
         good = ~np.isnan(self.y)
         self.x = self.x[good]
         self.y = self.y[good]
+        self.dy = self.dy[good]
         # maximum number of samples is 500 for faster computation
-        cadence = np.max(self.x) / n_bins
-        f = np.zeros(n_bins)
-        t = np.zeros(n_bins)
-        for i in range(n_bins):
-            t[i] = i * cadence
-            f[i] = np.mean(self.y[np.logical_and(self.x < (i + 1) * cadence, self.x > i * cadence)])
-        self.x = t[~np.isnan(f)]
-        self.y = f[~np.isnan(f)]
+        binsize = np.size(self.x) // n_bins
+        if binsize > 1:
+            n_bins = np.size(self.x) // binsize
+            indexes = np.array_split(np.arange(len(self.x)), n_bins)
+            self.x = np.array([np.mean(self.x[a]) for a in indexes])
+            self.y = np.array([np.mean(self.y[a]) for a in indexes])
+            self.dy = np.array([np.sqrt(np.nansum(self.dy[a]**2)) for a in indexes]) / binsize
         # normalize flux
+        self.dy /= np.max(self.dy)
         self.y /= np.max(self.y)
 
     def vsini(self, i, T):
