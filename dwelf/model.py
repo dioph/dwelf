@@ -712,7 +712,7 @@ class CheetahModeler(object):
         theta = np.append(star_params, theta)
         lp = self.lnprior(theta)
         if not np.isfinite(lp):
-            return np.ones_like(self.y)
+            return np.ones_like(self.y) * 1e90
         return (self.y - self.solve(theta)) / self.dy
 
     def llsq(self, p0s, n_iter=0, star_params=None):
@@ -759,12 +759,12 @@ class CheetahModeler(object):
         opts, sses = self.llsq(p0s, self.n_iter, star_params=star_params)
         # sort fits with respect to chi
         mask = np.isfinite(sses)
-        sses = np.array(sses)[mask]
-        opts = np.array(opts)[mask]
+        sses = np.asarray(sses)[mask]
+        opts = np.asarray(opts)[mask]
         sorted_ids = np.argsort(sses)
         opts = opts[sorted_ids]
         # let all parameters have same variance (enable clustering)
-        optsmat = whiten(opts)
+        optsmat = whiten(np.asarray(opts))
         # find (n_clusters) centroids using kmeans
         __, label = kmeans2(optsmat, self.n_clusters, iter=20, minit='points')
         label = list(label)
@@ -774,14 +774,14 @@ class CheetahModeler(object):
         opts, sses = self.llsq(p0s, star_params=star_params)
         # sort fits with respect to chi
         mask = np.isfinite(sses)
-        sses = np.array(sses)[mask]
-        opts = np.array(opts)[mask]
+        sses = np.asarray(sses)[mask]
+        opts = np.asarray(opts)[mask]
         sorted_ids = np.argsort(sses)
         sses = sses[sorted_ids]
         opts = opts[sorted_ids]
         threshold = sses[0] * self.threshratio
         # fits with chi <= given threshold
-        bestps = np.array(opts)[np.array(sses) <= threshold]
+        bestps = np.asarray(opts)[np.asarray(sses) <= threshold]
         return bestps[:min(6, len(bestps))]
 
     def multifit(self, p0s, verbose=True):
@@ -821,8 +821,8 @@ class CheetahModeler(object):
                 print('SIMULFIT #{1}: {0:.2f} s'.format(t4 - t3, i))
             # sort fits with respect to chi
             mask = np.isfinite(sses)
-            sses = np.array(sses)[mask]
-            opts = np.array(opts)[mask]
+            sses = np.asarray(sses)[mask]
+            opts = np.asarray(opts)[mask]
             sorted_ids = np.argsort(sses)
             opts = opts[sorted_ids]
             # opts stores all spots fitted so far
@@ -839,8 +839,15 @@ class CheetahModeler(object):
         mins = np.array([self.inc_min, self.Peq_min, self.k_min, self.lat_min, self.lon_min, self.rad_min])
         maxs = np.array([self.inc_max, self.Peq_max, self.k_max, self.lat_max, self.lon_max, self.rad_max])
         if method == 'random':
-            p0s = np.random.rand(self.n_spaced ** 6, 6)
-            q = p0s * (maxs - mins) + mins
+            m = np.ones(self.n_spaced ** 6, dtype=bool)
+            nbad = m.sum()
+            q = np.inf * np.ones((self.n_spaced ** 6, 6))
+            while nbad > 0:
+                p0s = np.random.rand(self.n_spaced ** 6, 6)
+                q[m] = p0s[m] * (maxs - mins) + mins
+                lp = np.array([self.lnprior(p) for p in q])
+                m = ~np.isfinite(lp)
+                nbad = m.sum()
         else:
             for i in range(6):
                 p0s.append(np.arange(mins[i] + (maxs[i] - mins[i]) / (2 * self.n_spaced), maxs[i],
