@@ -634,7 +634,7 @@ class CheetahModeler(object):
             self.y = np.array([np.mean(self.y[a]) for a in indexes])
             self.dy = np.array([np.sqrt(np.nansum(self.dy[a]**2)) for a in indexes]) / binsize
         # normalize flux
-        self.dy /= np.max(self.dy)
+        self.dy /= np.max(self.y)
         self.y /= np.max(self.y)
 
     def vsini(self, i, T):
