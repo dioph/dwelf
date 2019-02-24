@@ -136,7 +136,7 @@ def eker(t, theta, l1=.68, l2=0., ir=.22):
     return y
 
 
-def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbins=30):
+def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbins=30, s=1.0):
     """Plots a Giant Triangle Confusogram
 
     Parameters
@@ -153,6 +153,8 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbi
         List of decimal places to write down for each parameter. Defaults to 2
     nbins: int, optional
         Number of bins to be used in 1D and 2D histograms. Defaults to 30
+    s: float, optional
+        Standard deviation of Gaussian filter applied to smooth histograms. Defaults to 1.0
     """
     p = map(lambda v: (v[1], v[1] - v[0], v[2] - v[1]), zip(*np.percentile(samples, [16, 50, 84], axis=0)))
     p = list(p)
@@ -173,7 +175,7 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbi
         ax = fig.add_subplot(grid[i, i])
         H, edges = np.histogram(samples[:, i], bins=nbins, density=True)
         centers = (edges[1:] + edges[:-1]) / 2
-        data = ndimage.gaussian_filter1d((centers, H), sigma=1.0)
+        data = ndimage.gaussian_filter1d((centers, H), sigma=s)
         data[1] /= data[1].sum()
         l1, = ax.plot(data[0], data[1], 'b-', lw=1, label='posterior')
         if priors is not None:
@@ -221,7 +223,7 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbi
             H_cumul = np.cumsum(H_order)
             tmp = np.interp([.0455, .3173, 1.0], H_cumul, nbins_flat)
             chainlevels = np.interp(tmp, nbins_flat, H_order)
-            data = ndimage.gaussian_filter(H.T, sigma=1.0)
+            data = ndimage.gaussian_filter(H.T, sigma=s)
             xbins = (xi[1:] + xi[:-1]) / 2
             ybins = (yi[1:] + yi[:-1]) / 2
             ax.contourf(xbins, ybins, data, levels=chainlevels, colors=['#1f77b4', '#52aae7', '#85ddff'], alpha=0.3)
