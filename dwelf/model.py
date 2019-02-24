@@ -758,7 +758,11 @@ class CheetahModeler(object):
         # initial fit with few (n_iter) iterations
         opts, sses = self.llsq(p0s, self.n_iter, star_params=star_params)
         # sort fits with respect to chi
-        sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
+        mask = np.isfinite(sses)
+        sses = np.array(sses)[mask]
+        opts = np.array(opts)[mask]
+        sorted_ids = np.argsort(sses)
+        opts = opts[sorted_ids]
         # let all parameters have same variance (enable clustering)
         optsmat = whiten(np.array(opts))
         # find (n_clusters) centroids using kmeans
@@ -769,7 +773,12 @@ class CheetahModeler(object):
         # final fit with full iterations
         opts, sses = self.llsq(p0s, star_params=star_params)
         # sort fits with respect to chi
-        sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
+        mask = np.isfinite(sses)
+        sses = np.array(sses)[mask]
+        opts = np.array(opts)[mask]
+        sorted_ids = np.argsort(sses)
+        sses = sses[sorted_ids]
+        opts = opts[sorted_ids]
         threshold = sses[0] * self.threshratio
         # fits with chi <= given threshold
         bestps = np.array(opts)[np.array(sses) <= threshold]
@@ -811,7 +820,11 @@ class CheetahModeler(object):
             if verbose:
                 print('SIMULFIT #{1}: {0:.2f} s'.format(t4 - t3, i))
             # sort fits with respect to chi
-            sses, opts = zip(*sorted(zip(sses, opts), key=lambda x: x[0]))
+            mask = np.isfinite(sses)
+            sses = np.array(sses)[mask]
+            opts = np.array(opts)[mask]
+            sorted_ids = np.argsort(sses)
+            opts = opts[sorted_ids]
             # opts stores all spots fitted so far
             opts1 = opts
         t4 = time.perf_counter()
