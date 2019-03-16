@@ -464,9 +464,11 @@ class MaculaModeler(object):
 
             # limb-darkening parameter space
             if self.limb_law is 'quadratic':
-                fit_params['c2'], fit_params['c4'] = quadratic_limb(fit_params['c2'], fit_params['c4'])
+                u1, u2 = quadratic_limb(fit_params['c2'], fit_params['c4'])
+                fit_params['c2'], fit_params['c4'] = u1 + 2*u2, -u2
                 if 'd2' in self.fit_names:
-                    fit_params['d2'], fit_params['d4'] = quadratic_limb(fit_params['d2'], fit_params['d4'])
+                    u1, u2 = quadratic_limb(fit_params['d2'], fit_params['d4'])
+                    fit_params['d2'], fit_params['d4'] = u1 + 2*u2, -u2
                     done.append('d2')
                     done.append('d4')
                 done.append('c2')
