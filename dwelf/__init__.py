@@ -1,7 +1,7 @@
 import os
 
 name = "dwelf"
-__version__ = "1.0a1"
+__version__ = "1.0a2"
 PACKAGEDIR = os.path.abspath(os.path.dirname(__file__))
 MPLSTYLE = '{}/data/supermongo.mplstyle'.format(PACKAGEDIR)
 
