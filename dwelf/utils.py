@@ -335,7 +335,7 @@ def change_coord(q1, q2, triang):
 def quadratic_limb(q1, q2):
     u1 = 2 * np.sqrt(q1) * q2
     u2 = np.sqrt(q1) * (1 - 2 * q2)
-    return u1, u2
+    return u1 + 2*u2, -u2
 
 
 def cubic_limb(q1, q2, q3):
