@@ -1,7 +1,7 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy import ndimage
+import numpy as np
 from _macula import maculamod
+from scipy import ndimage
 
 
 def eker(t, theta, l1=.68, l2=0., ir=.22):
@@ -62,7 +62,7 @@ def eker(t, theta, l1=.68, l2=0., ir=.22):
         ic[jf] = np.pi * np.sin(rad) ** 2 * costhe0_f
         il[jf] = 2 * np.pi / 3 * (1 - cosrad ** 3) - np.pi * cosrad * sinrad ** 2 * sinthe0_f ** 2
         iq[jf] = np.pi / 2 * (1 - cosrad ** 4) * costhe0_f ** 3 + \
-            3 * np.pi / 4 * sinrad ** 4 * costhe0_f * sinthe0_f ** 2
+                 3 * np.pi / 4 * sinrad ** 4 * costhe0_f * sinthe0_f ** 2
     #
     # GIBBOUS (more than half visible)
     #
@@ -88,12 +88,12 @@ def eker(t, theta, l1=.68, l2=0., ir=.22):
                (4.0 / 3) * sinphi0_g * (sinrad ** 3 - sinrad0_g ** 3) * sinthe0_g * costhe0_g - \
                (1.0 / 3) * sinphi0_g * cosphi0_g * (cosrad ** 3 - cosrad0_g ** 3) * sinthe0_g ** 2
         cq_g = 2 * costhe0_g ** 3 * k1_g + 6 * costhe0_g ** 2 * sinthe0_g * k2_g + \
-            6 * costhe0_g * sinthe0_g ** 2 * k3_g + 2 * sinthe0_g ** 3 * k4_g
+               6 * costhe0_g * sinthe0_g ** 2 * k3_g + 2 * sinthe0_g ** 3 * k4_g
         ic[jg] = phi0_g * costhe0_g * sinrad ** 2 - np.arcsin(cosrad / sinthe0_g) - \
-            0.5 * sinthe0_g * sinphi0_g * np.sin(2 * rad) + np.pi / 2
+                 0.5 * sinthe0_g * sinphi0_g * np.sin(2 * rad) + np.pi / 2
         il[jg] = 2 * np.pi / 3 * (1 - cosrad ** 3) - np.pi * cosrad * sinrad ** 2 * sinthe0_g ** 2 - cl_g
         iq[jg] = np.pi / 2 * (1 - cosrad ** 4) * costhe0_g ** 3 + 3 * np.pi / 4 * \
-            sinrad ** 4 * costhe0_g * sinthe0_g ** 2 - cq_g
+                 sinrad ** 4 * costhe0_g * sinthe0_g ** 2 - cq_g
     #
     # CRESCENT (less than half visible)
     #
@@ -115,9 +115,9 @@ def eker(t, theta, l1=.68, l2=0., ir=.22):
                                                    (np.sin(2 * rad) * (np.cos(2 * rad) - 4) -
                                                     np.sin(2 * rad0_c) * (np.cos(2 * rad0_c) - 4)))
         cq_c = 2 * costhe0_c ** 3 * k1_c + 6 * costhe0_c ** 2 * sinthe0_c * k2_c + \
-            6 * costhe0_c * sinthe0_c ** 2 * k3_c + 2 * sinthe0_c ** 3 * k4_c
+               6 * costhe0_c * sinthe0_c ** 2 * k3_c + 2 * sinthe0_c ** 3 * k4_c
         ic[jc] = phi0_c * costhe0_c * sinrad ** 2 - np.arcsin(cosrad / sinthe0_c) - \
-            0.5 * sinthe0_c * sinphi0_c * np.sin(2 * rad) + np.pi / 2
+                 0.5 * sinthe0_c * sinphi0_c * np.sin(2 * rad) + np.pi / 2
         il[jc] = (phi0_c / 3) * (cosrad ** 3 - cosrad0_c ** 3) * (1 - 3 * costhe0_c ** 2) - \
                  (phi0_c + sinphi0_c * cosphi0_c) * (cosrad - cosrad0_c) * sinthe0_c ** 2 + \
                  (4.0 / 3) * sinphi0_c * (sinrad ** 3 - sinrad0_c ** 3) * sinthe0_c * costhe0_c + \
@@ -315,37 +315,15 @@ def macula(t, theta_star, theta_spot, theta_inst, derivatives=False, temporal=Fa
 
 def triangulate(poly):
     triangles = []
-    for i in range(poly.shape[0]-2):
-        triangles.append(np.array([poly[i], poly[i+1], poly[-1]]))
+    for i in range(poly.shape[0] - 2):
+        triangles.append(np.array([poly[i], poly[i + 1], poly[-1]]))
     return np.array(triangles)
 
 
 def triangle_area(triang):
     A, B, C = triang
-    area = np.abs(A[0]*(B[1]-C[1]) + B[0]*(C[1]-A[1]) + C[0]*(A[1]-B[1]))/2
+    area = np.abs(A[0] * (B[1] - C[1]) + B[0] * (C[1] - A[1]) + C[0] * (A[1] - B[1])) / 2
     return area
-
-
-def change_coord(q1, q2, triang):
-    A, B, C = triang
-    v = (1 - np.sqrt(q1)) * A + np.sqrt(q1) * (1 - q2) * B + q2 * np.sqrt(q1) * C
-    return v
-
-
-def quadratic_limb(q1, q2):
-    u1 = 2 * np.sqrt(q1) * q2
-    u2 = np.sqrt(q1) * (1 - 2 * q2)
-    return u1 + 2*u2, -u2
-
-
-def cubic_limb(q1, q2, q3):
-    c2 = (q1 ** (1 / 3) / 12) * (28 * (9 - 5 * np.sqrt(2)) + 3 * np.sqrt(q2) *
-                                 (-6 * np.cos(2 * np.pi * q3) + (3 + 10 * np.sqrt(2) * np.sin(2 * np.pi * q3))))
-    c3 = (q1 ** (1 / 3) / 9) * (-632 + 396 * np.sqrt(q2)
-                                + 3 * np.sqrt(q2) * (4 - 21 * np.sqrt(2)) * np.sin(2 * np.pi * q3))
-    c4 = (q1 ** (1 / 3) / 12) * (28 * (9 - 5 * np.sqrt(2)) + 3 * np.sqrt(q2) *
-                                 (6 * np.cos(2 * np.pi * q3) + (3 + 10 * np.sqrt(2) * np.sin(2 * np.pi * q3))))
-    return c2, c3, c4
 
 
 def polygon_intersection(poly1, poly2):
@@ -379,14 +357,14 @@ def get_intersection_point(l1p1, l1p2, l2p1, l2p2):
         return np.nan
     x = (b2 * c1 - b1 * c2) / det
     y = (a1 * c2 - a2 * c1) / det
-    online1 = ((min(l1p1[0], l1p2[0]) < x) or (np.abs(min(l1p1[0], l1p2[0]) - x) < 1e-9)) \
-        and ((max(l1p1[0], l1p2[0]) > x) or (np.abs(max(l1p1[0], l1p2[0]) - x) < 1e-9)) \
-        and ((min(l1p1[1], l1p2[1]) < y) or (np.abs(min(l1p1[1], l1p2[1]) - y) < 1e-9)) \
-        and ((max(l1p1[1], l1p2[1]) > y) or (np.abs(max(l1p1[1], l1p2[1]) - y) < 1e-9))
-    online2 = ((min(l2p1[0], l2p2[0]) < x) or (np.abs(min(l2p1[0], l2p2[0]) - x) < 1e-9)) \
-        and ((max(l2p1[0], l2p2[0]) > x) or (np.abs(max(l2p1[0], l2p2[0]) - x) < 1e-9)) \
-        and ((min(l2p1[1], l2p2[1]) < y) or (np.abs(min(l2p1[1], l2p2[1]) - y) < 1e-9)) \
-        and ((max(l2p1[1], l2p2[1]) > y) or (np.abs(max(l2p1[1], l2p2[1]) - y) < 1e-9))
+    online1 = ((min(l1p1[0], l1p2[0]) < x) or np.isclose(min(l1p1[0], l1p2[0]), x)) \
+              and ((max(l1p1[0], l1p2[0]) > x) or np.isclose(max(l1p1[0], l1p2[0]), x)) \
+              and ((min(l1p1[1], l1p2[1]) < y) or np.isclose(min(l1p1[1], l1p2[1]), y)) \
+              and ((max(l1p1[1], l1p2[1]) > y) or np.isclose(max(l1p1[1], l1p2[1]), y))
+    online2 = ((min(l2p1[0], l2p2[0]) < x) or np.isclose(min(l2p1[0], l2p2[0]), x)) \
+              and ((max(l2p1[0], l2p2[0]) > x) or np.isclose(max(l2p1[0], l2p2[0]), x)) \
+              and ((min(l2p1[1], l2p2[1]) < y) or np.isclose(min(l2p1[1], l2p2[1]), y)) \
+              and ((max(l2p1[1], l2p2[1]) > y) or np.isclose(max(l2p1[1], l2p2[1]), y))
     if online1 and online2:
         return np.array([x, y])
 
@@ -415,12 +393,11 @@ def add_point(l, p):
 
 
 def is_inside(p, poly):
-    i = 0
     j = poly.shape[0] - 1
     res = False
     for i in range(poly.shape[0]):
         if (poly[i, 1] > p[1]) != (poly[j, 1] > p[1]) \
-          and p[0] < (poly[j, 0] - poly[i, 0]) * (p[1] - poly[i, 1]) / (poly[j, 1] - poly[i, 1]) + poly[i, 0]:
+                and p[0] < (poly[j, 0] - poly[i, 0]) * (p[1] - poly[i, 1]) / (poly[j, 1] - poly[i, 1]) + poly[i, 0]:
             res = not res
         j = i
         i = i + 1

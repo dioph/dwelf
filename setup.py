@@ -1,5 +1,6 @@
-from numpy.distutils.core import Extension, setup
 import builtins
+
+from numpy.distutils.core import Extension, setup
 
 with open("README.md", 'r') as f:
     long_description = f.read()
@@ -7,6 +8,7 @@ with open("README.md", 'r') as f:
 extension = Extension(name="_macula", sources=["dwelf/macula.f90"], extra_compile_args=["-O3"])
 builtins.__DWELF_SETUP__ = True
 import dwelf
+
 version = dwelf.__version__
 
 setup(
@@ -20,7 +22,7 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/dioph/dwelf",
     packages=["dwelf"],
-    package_data={'dwelf':['data/*']},
+    package_data={'dwelf': ['data/*']},
     include_package_data=True,
     ext_modules=[extension],
     install_requires=["numpy>=1.11", "scipy>=0.19.0", "astropy>=1.3",
