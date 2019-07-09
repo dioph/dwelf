@@ -76,7 +76,7 @@ class MaculaModeler(object):
 
         # validate star params
         if self.Pvec is None:
-            self.Pvec = Uniform(ndim=2, xmin=(0, 0), xmax=(50, 1))
+            self.Pvec = Uniform(ndim=2, xmin=(0, 0), xmax=(1, 50))
         if self.k2 is None:
             self.k2 = Uniform(-1, 1)
         if self.k4 is None:
@@ -157,9 +157,9 @@ class MaculaModeler(object):
         i, j = 0, 0
         for key, val in self.parameters.items():
             j += val.n_inputs
-            theta = np.append(theta, val.sample(x[i:j]))
+            theta = np.append(theta, val.sample(*x[i:j]))
             i = j
-        theta[1] = np.arcsin(theta[1])
+        theta[0] = np.arcsin(theta[0])
         return theta
 
     def predict(self, t, theta):

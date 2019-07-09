@@ -90,6 +90,7 @@ class Normal(Prior):
         self.last_sampled = norm(self.mu, self.sd).ppf(x)
         return self.last_sampled
 
+
 class LogNormal(Prior):
     def __init__(self, logmu=0., logsd=1., ndim=1):
         super(LogNormal, self).__init__()
@@ -135,6 +136,15 @@ class Polygon(Prior):
         q2 = (q2 - self.area_limits[group]) / self.relative_area[group]
         self.last_sampled = Triangular(triangle).sample(q1, q2)
         return self.last_sampled
+
+
+def constrain_Pvec(Pmin=0, Pmax=50, sinimin=0, sinimax=1, vmin=1e-9, vmax=1e9, rmin=1e-9, rmax=1e9):
+    k = 2 * np.pi / 86400
+    wmin, wmax = np.array([vmin / rmax, vmax / rmin]) / 695700
+    poly1 = np.array([[0, 0], [1, k/wmin], [1, k/wmax]])
+    poly2 = np.array([[sinimin, Pmin], [sinimin, Pmax], [sinimax, Pmax], [sinimax, Pmin]])
+    poly = polygon_intersection(poly1, poly2)
+    return Polygon(poly)
 
 
 # LDC DISTRIBUTIONS
