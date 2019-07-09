@@ -177,8 +177,8 @@ class MaculaModeler(object):
         theta = np.asarray(theta)
         assert theta.size == 12 + self.nspots * 8 + self.mmax * 2, "Parameter vector with wrong size"
         theta_star = theta[:12]
-        theta_spot = theta[12:12 + self.nspots * 8]
-        theta_inst = theta[12 + self.nspots * 8:]
+        theta_spot = theta[12:12 + self.nspots * 8].reshape(8, -1)
+        theta_inst = theta[12 + self.nspots * 8:].reshape(2, -1)
         yf = macula(t, theta_star, theta_spot, theta_inst, tstart=self.tstart, tend=self.tend)
         return yf
 
@@ -331,12 +331,13 @@ class MaculaModeler(object):
         """
 
         def prior(cube):
-            return self.sample(cube)
+            return cube
 
         def logl(cube):
+            theta = self.sample(cube)
             n = self.t.size
             c = - .5 * n * np.log(2 * np.pi) - .5 * np.log(self.dy).sum()
-            return c - .5 * self.chi(cube)
+            return c - .5 * self.chi(theta)
 
         results = solve(LogLikelihood=logl, Prior=prior, n_dims=self.ndim, sampling_efficiency=sampling_efficiency,
                         const_efficiency_mode=const_efficiency_mode, n_live_points=n_live_points, **kwargs)
