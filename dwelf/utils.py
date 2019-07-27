@@ -192,6 +192,7 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbi
         else:
             ax.tick_params(rotation=45)
         ax.set_yticks([])
+        ax.get_xaxis().set_major_locator(plt.MaxNLocator(3))
         ax.set_ylim(0)
         if labels is not None:
             ax.set_title('{0} = {1:.{4}f}$^{{+{2:.{4}f}}}_{{-{3:.{4}f}}}$'.format(labels[i], p[i][0], p[i][2], p[i][1],
@@ -228,6 +229,8 @@ def plot_mcmc(samples, labels=None, priors=None, ptrue=None, precision=None, nbi
             ybins = (yi[1:] + yi[:-1]) / 2
             ax.contourf(xbins, ybins, data, levels=chainlevels, colors=['#1f77b4', '#52aae7', '#85ddff'], alpha=0.3)
             ax.contour(data, chainlevels, extent=extents, colors='b')
+            ax.get_xaxis().set_major_locator(plt.MaxNLocator(3))
+            ax.get_yaxis().set_major_locator(plt.MaxNLocator(3))
             if ptrue[i] is not None:
                 ax.axhline(ptrue[i], color='gray', lw=1.5)
             if ptrue[j] is not None:
