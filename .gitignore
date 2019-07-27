@@ -1,0 +1,8 @@
+.idea/*
+build/*
+dist/*
+*.pyc
+out/*
+out2/*
+kep17/*
+venv/*
